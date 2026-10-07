@@ -1,11 +1,16 @@
 # One published version of the console library.
 #
-# The library source lives on disk under vendor/console/<version>/. This row is
-# the pointer to it plus the metadata a gallery needs. Splitting the two means
-# the version is a first-class thing a cartridge can be pinned to, and the
-# files stay reviewable in the repository rather than hiding in a blob.
+# The library source lives in ActiveStorage, one blob per file, addressed by
+# path through the console_library_files rows this has_many. This row is what
+# a cartridge is pinned to; the files are what those pins resolve to.
 class ConsoleVersion < ApplicationRecord
   has_many :cartridges, dependent: :restrict_with_error
+
+  # Dependent destroy rather than restrict: a version's files are part of the
+  # version, so removing the row should remove them. Cartridges above still
+  # refuse the removal, which is the guard that actually matters -- a version
+  # somebody is still pinned to must not go away, attached or not.
+  has_many :console_library_files, dependent: :destroy
 
   validates :version, presence: true, uniqueness: true,
     format: { with: /\A\d+\.\d+\.\d+\z/, message: "must look like 0.1.0" }
@@ -21,11 +26,7 @@ class ConsoleVersion < ApplicationRecord
     default_first.where(default: true).first || newest_first.first
   end
 
-  # The library this row points at, or nil when the directory is missing.
-  #
-  # Returning nil rather than raising is deliberate: an admin can add a row
-  # before the files land, and a gallery listing should degrade to "library
-  # missing" instead of taking the whole page down.
+  # The library this row points at.
   def library
     @library ||= ConsoleLibrary.new(self)
   end

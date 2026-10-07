@@ -45,7 +45,7 @@
   <h2>Library</h2>
   <table class="admin-table">
     <tbody>
-      <tr><th>Directory</th><td><code><%= @console_version.library.directory.relative_path_from(Rails.root) %></code></td></tr>
+      <tr><th>Files</th><td><%= @console_version.console_library_files.count %> in storage</td></tr>
       <tr><th>Declared version</th><td><code><%= @declared.inspect %></code></td></tr>
       <tr><th>Modules required</th><td><%= @modules.size %></td></tr>
       <tr><th>Fonts</th><td><%= @fonts.empty? ? "none" : @fonts.join(", ") %></td></tr>

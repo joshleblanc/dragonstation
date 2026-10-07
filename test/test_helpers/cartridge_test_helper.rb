@@ -7,6 +7,22 @@ require "zip"
 # that most of what CartridgeIngest refuses -- traversal, absolute paths,
 # symlinks, expansion bombs -- only exists at that layer.
 module CartridgeTestHelper
+  # Per-process memo of the console checkout's files. Module-level because it is
+  # shared by every test in the process and outlives any one test's transaction.
+  def self.console_entries
+    @console_entries ||= ConsoleLibraryInstall.directory_entries(console_checkout)
+  end
+
+  def self.console_checkout
+    path = ENV["CONSOLE_PATH"].presence || Rails.root.join("../dragonruby/console").to_s
+
+    unless File.directory?(path)
+      raise "console checkout not found at #{path}. Set CONSOLE_PATH to a console checkout."
+    end
+
+    path
+  end
+
   def build_archive(entries)
     buffer = Zip::OutputStream.write_buffer(StringIO.new(+"")) do |zip|
       entries.each do |path, content|
@@ -42,12 +58,54 @@ module CartridgeTestHelper
     }.merge(extra)
   end
 
-  def console_version!(version: "0.1.0")
-    ConsoleVersion.find_or_create_by!(version: version) do |record|
-      record.title = "Console #{version}"
-      record.default = true
-    end
+  # A console every test can build a cartridge against.
+  #
+  # Installed through ConsoleLibraryInstall rather than created as a bare row.
+  # Most of what the suite exercises is *reading* a library -- the manifest, the
+  # documentation pages, the release bundle -- and a row with no files behind it
+  # would make those assertions pass against nothing. Marked default in the same
+  # breath: the app's rule is that a fresh install with no flag set still uploads
+  # something, and a test that pinned a version and got a different default would
+  # be testing the fixture rather than the code.
+  #
+  # The real console checkout, so the library under test is the one that ships.
+  # CONSOLE_PATH points at it; the sibling checkout is the default because that is
+  # where it lives next to this repository.
+  def console_version!(version: CONSOLE_VERSION)
+    ConsoleVersion.find_by(version: version) ||
+      install_real_console_library(version).tap { |installed| installed.update!(default: true) }
   end
+
+  CONSOLE_VERSION = "0.1.0"
+
+  # Where the console checkout is. Tests that need a real library read it from
+  # here rather than from a copy in this repository, which is what the storage
+  # change removed.
+  def console_checkout
+    path = ENV["CONSOLE_PATH"].presence || Rails.root.join("../dragonruby/console").to_s
+
+    unless File.directory?(path)
+      raise "console checkout not found at #{path}. Set CONSOLE_PATH to a console checkout."
+    end
+
+    path
+  end
+
+  # Install the real library, straight from the checkout, through the same
+  # ConsoleLibraryInstall the rake task and the upload screen use.
+  def install_real_console_library(version = CONSOLE_VERSION)
+    ConsoleLibraryInstall.install!(real_console_entries, title: "Console #{version}")
+  end
+
+  # The checkout's files, read once per process.
+  #
+  # The suite installs this library in hundreds of tests, and the tree includes
+  # font.ttf at 3.4MB -- reading it per test turns a fast suite into a slow one
+  # for no gain. The install itself still happens per test, because that is what
+  # the tests are about; only the read is shared.
+  def real_console_entries = CartridgeTestHelper.console_entries
+
+  def console_checkout = CartridgeTestHelper.console_checkout
 
   # Uploads get whatever the default is, the same way the controller picks it.
   def ingest(entries, user:, console_version: nil, title: nil)

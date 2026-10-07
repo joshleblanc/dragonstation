@@ -1,0 +1,47 @@
+<% content_for :title, @module.name %>
+
+<div class="page-head">
+  <h1><code><%= @module.name %></code></h1>
+  <p class="lede">
+    console <%= @console_version.version %>
+    &middot; <%= @module.path %>
+    &middot; <%= pluralize(@module.line_count, "line") %>
+    &middot; <%= link_to "view source", doc_source_path(@module.slug) %>
+  </p>
+  <% if @module.named_modules.size > 1 %>
+    <p class="muted">
+      Also defined here:
+      <%= @module.named_modules.drop(1).map { |n| tag.code(n) }.join(", ").html_safe %>
+    </p>
+  <% end %>
+</div>
+
+<% if @module.error %>
+  <p class="flash flash-alert">This module could not be read: <%= @module.error %></p>
+<% else %>
+  <%= doc_blocks(@module.summary_doc) %>
+
+  <% @module.sections.each do |section| %>
+    <section class="doc-section">
+      <% if section.title.present? %><h2><%= section.title %></h2><% end %>
+
+      <dl class="doc-methods">
+        <% section.methods.each do |method| %>
+          <div class="doc-method" id="<%= method.name %>">
+            <dt><code class="doc-signature"><%= raw signature_markup(method.signature) %></code></dt>
+            <dd>
+              <% if method.documented? %>
+                <%= doc_blocks(method.doc) %>
+              <% else %>
+                <%# No comment above it: the name is the documentation. Rendering
+                    an empty paragraph for each of these would bury the ones
+                    that do explain themselves, so they are listed bare. %>
+                <span class="muted">line <%= method.line %></span>
+              <% end %>
+            </dd>
+          </div>
+        <% end %>
+      </dl>
+    </section>
+  <% end %>
+<% end %>

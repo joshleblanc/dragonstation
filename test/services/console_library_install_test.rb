@@ -1,20 +1,7 @@
 require "test_helper"
 
 class ConsoleLibraryInstallTest < ActiveSupport::TestCase
-  # ConsoleLibrary is redirected for every test in this class rather than inside
-  # a block in the two that need it. An install writes real files, and a single
-  # test that forgets the redirect leaves a version directory in the repository
-  # where the next test can adopt it -- so the redirect is the default here and
-  # has to be undone deliberately.
-  setup do
-    @root = Dir.mktmpdir
-    @original_library_root = redirect_library_root(@root)
-  end
-
-  teardown do
-    restore_library_root(@original_library_root)
-    FileUtils.rm_rf(@root)
-  end
+  teardown { @checkouts&.each { |dir| FileUtils.rm_rf(dir) } }
 
   test "installs a library and registers the version" do
     version = install("0.2.0")
@@ -25,26 +12,27 @@ class ConsoleLibraryInstallTest < ActiveSupport::TestCase
     assert_includes ConsoleVersion.pluck(:version), "0.2.0"
   end
 
-  test "writes the library files where the runtime will look for them" do
-    install("0.2.0")
+  test "stores every library file against the version row" do
+    version = install("0.2.0")
 
-    assert_equal [ "0.2.0" ], installed_versions(@root)
-    assert File.file?(File.join(@root, "0.2.0", "app", "main.rb"))
-    assert File.file?(File.join(@root, "0.2.0", "app", "console", "core.rb"))
-    assert File.file?(File.join(@root, "0.2.0", "app", "console", "version.rb"))
+    assert_equal %w[app/console/core.rb app/console/version.rb app/main.rb],
+      version.console_library_files.ordered.pluck(:path)
+    assert_equal "module Console; end\n", version.library.read("app/console/core.rb")
+    assert_equal version.console_library_files.sum(:byte_size),
+      version.console_library_files.sum { |file| file.read.bytesize }
   end
 
-  test "leaves no staging directory behind" do
+  test "a refused install leaves nothing behind" do
     install("0.2.0")
 
-    # A refused install cleans up after itself, or the next `console:install`
-    # would walk into a half-written library.
+    # Nothing is written before validation passes, so a refused install cannot
+    # leave a half-written version behind for the next install to adopt.
     entries = console_library_entries("0.3.0")
     entries.delete("app/console/core.rb")
     assert_rejected build_archive(entries)
 
-    assert_equal [ "0.2.0" ], installed_versions(@root)
-    assert_empty Dir.children(@root).grep(/\A\.incoming/)
+    assert_equal %w[0.2.0], ConsoleVersion.pluck(:version)
+    assert_equal 3, ConsoleLibraryFile.count
   end
 
   test "takes the title and notes it was given" do
@@ -71,13 +59,16 @@ class ConsoleLibraryInstallTest < ActiveSupport::TestCase
     version = install("0.2.0", prefix: "release-candidate")
 
     assert_equal "0.2.0", version.version
-    assert_equal [ "0.2.0" ], installed_versions(@root)
+    assert_equal %w[0.2.0], ConsoleVersion.pluck(:version)
+    # The wrapper is packaging, not part of the library.
+    assert_equal %w[app/console/core.rb app/console/version.rb app/main.rb],
+      version.console_library_files.ordered.pluck(:path)
   end
 
   # --- the rule that makes this an install, not an update ---------------
 
   test "refuses to overwrite an installed version" do
-    install("0.2.0")
+    installed_library = install("0.2.0")
 
     changed = console_library_entries("0.2.0", "app/console/core.rb" => "module Console; CHANGED = true; end\n")
     error = assert_rejected build_archive(changed)
@@ -87,10 +78,10 @@ class ConsoleLibraryInstallTest < ActiveSupport::TestCase
 
     # The installed copy is untouched. This is the whole point: a cartridge
     # pinned to 0.2.0 must keep running the bytes it was pinned to.
-    assert_equal "module Console; end\n", File.read(File.join(@root, "0.2.0", "app", "console", "core.rb"))
+    assert_equal "module Console; end\n", installed_library.read("app/console/core.rb")
   end
 
-  test "refuses when the version has a row but no directory" do
+  test "refuses when the version has a row but no files" do
     # A row can outlive its files. Treating the row as occupied is what stops a
     # re-upload from silently becoming an update.
     ConsoleVersion.create!(version: "0.2.0")
@@ -100,13 +91,15 @@ class ConsoleLibraryInstallTest < ActiveSupport::TestCase
     assert_match(/already installed/, error.message)
   end
 
-  test "refuses when the directory exists but has no row" do
-    FileUtils.mkdir_p(File.join(@root, "0.2.0"))
-
-    error = assert_rejected console_library_archive("0.2.0")
-
-    assert_match(%r{already exists}, error.message)
+  # The storage case that used to need its own test: a directory that existed
+  # with no row. It cannot be produced here -- files hang off the row, so there
+  # is no directory to exist without one. Pinning the rule that replaced it:
+  test "there is no way to occupy a version without a row" do
+    assert_no_difference -> { ConsoleVersion.count } do
+      assert_rejected console_library_archive("0.2.0")
+    end
     assert_empty ConsoleVersion.all
+    assert_empty ConsoleLibraryFile.all
   end
 
   test "installs a new version alongside one that is already in use" do
@@ -118,7 +111,7 @@ class ConsoleLibraryInstallTest < ActiveSupport::TestCase
     # 0.2.0 stays exactly as it was, and nothing pinned to it moves.
     assert_equal old, cartridge.reload.console_version
     assert_not_equal old, fresh
-    assert_equal %w[0.2.0 0.3.0], installed_versions(@root)
+    assert_equal %w[0.2.0 0.3.0], ConsoleVersion.order(:version).pluck(:version)
   end
 
   # --- what may go into the served tree ---------------------------------
@@ -234,6 +227,27 @@ class ConsoleLibraryInstallTest < ActiveSupport::TestCase
     assert_rejected build_archive({}), /empty/
   end
 
+  test "installs a library from a checkout on disk, as the rake task does" do
+    # The same install, from a directory rather than an archive. Both paths share
+    # inspect, so this is the assertion that a checkout and an upload of the same
+    # library cannot diverge.
+    version = ConsoleLibraryInstall.install!(checkout("0.4.0"))
+
+    assert_equal "0.4.0", version.version
+    assert version.available?
+    assert_equal 2, version.library.require_paths.size
+  end
+
+  test "refuses a directory that is not a library" do
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, "notes.txt"), "hello")
+
+      assert_raises(ConsoleLibraryInstall::Invalid) { ConsoleLibraryInstall.install!(dir) }
+    end
+
+    assert_empty ConsoleVersion.all
+  end
+
   private
     def install(version, prefix: nil)
       entries = console_library_entries(version)
@@ -241,6 +255,23 @@ class ConsoleLibraryInstallTest < ActiveSupport::TestCase
 
       ConsoleLibraryInstall.new(archive: build_archive(entries)).call
     end
+
+    # A console on disk, so the directory-reading install has something real to
+    # read. Written to a tmpdir and removed after, rather than into the repo.
+    def checkout(version, extra = {})
+      dir = Dir.mktmpdir
+
+      console_library_entries(version, extra).each do |path, bytes|
+        full = File.join(dir, path)
+        FileUtils.mkdir_p(File.dirname(full))
+        File.binwrite(full, bytes)
+      end
+
+      @checkouts << dir
+      dir
+    end
+
+    def checkouts = @checkouts ||= []
 
     def assert_rejected(archive, matching = nil)
       error = assert_raises(ConsoleLibraryInstall::Invalid) do

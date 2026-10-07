@@ -321,3 +321,109 @@ input[type="submit"]:hover, .link-button:hover { filter: brightness(1.08); }
 }
 
 .form-errors ul { margin: 0; padding-left: 1.1rem; }
+/* --- documentation ---------------------------------------------------- */
+
+/* Read out of the library's own comments, so the styles here are about making
+   prose and code sit well together rather than about branding a page. */
+.doc-section { margin: 2rem 0; }
+.doc-section h2 {
+  font-size: 1.05rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 0.4rem;
+  margin: 0 0 1rem;
+}
+.doc-section h3 { font-size: 1rem; margin: 1.5rem 0 0.4rem; }
+
+.doc-note {
+  padding: 0.9rem 1.1rem;
+  background: var(--panel);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+.doc-note p { margin: 0; }
+
+.doc-sample { margin: 0 0 1.75rem; }
+.doc-sample p { margin: 0 0 0.6rem; }
+
+/* A sample inside the documentation is read, not edited, so it is allowed to
+   be as tall as it needs to be -- unlike the cart reader's capped box, whose job
+   is to leave room for the game above it. */
+.source.sample { border-radius: var(--radius); }
+.source.full { max-height: none; border-radius: var(--radius); }
+
+.doc-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+.doc-table td { padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+.doc-table td:first-child { white-space: nowrap; }
+.doc-when { color: var(--muted); white-space: nowrap; }
+
+.doc-methods { margin: 0; }
+.doc-method { margin: 0 0 1.1rem; }
+.doc-method dt { margin: 0 0 0.2rem; }
+.doc-method dd { margin: 0 0 0 0.2rem; }
+.doc-signature {
+  display: inline-block;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85rem;
+  background: none;
+  padding: 0;
+}
+.doc-method dd p { margin: 0 0 0.4rem; }
+.doc .doc code { background: var(--panel-2); }
+
+.doc-index { list-style: none; margin: 0; padding: 0; }
+.doc-index li {
+  display: grid;
+  grid-template-columns: minmax(9rem, 14rem) 1fr auto;
+  gap: 0.75rem;
+  align-items: baseline;
+  padding: 0.45rem 0;
+  border-bottom: 1px solid var(--line);
+}
+.doc-index-summary { color: var(--muted); font-size: 0.86rem; }
+
+/* --- downloads and keys ------------------------------------------------ */
+
+.button-link {
+  display: inline-block;
+  padding: 0.45rem 0.9rem;
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-radius: var(--radius);
+  font-weight: 600;
+}
+.button-link:hover { text-decoration: none; filter: brightness(1.08); }
+
+/* The one response in which a key exists. Given room to be copied, and marked
+   so it cannot be mistaken for anything else on the page. */
+.key-reveal {
+  padding: 1rem 1.1rem;
+  background: var(--panel);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  margin: 1rem 0;
+}
+.key-reveal-label {
+  margin: 0 0 0.4rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.75rem;
+  color: var(--accent);
+}
+.key-value {
+  display: block;
+  font-size: 0.9rem;
+  word-break: break-all;
+  background: none;
+  padding: 0;
+  user-select: all;
+}
+.key-reveal .muted { margin: 0.6rem 0 0; }
+
+.doc-steps { margin: 0.75rem 0; padding-left: 1.3rem; }
+.doc-steps li { margin-bottom: 0.4rem; }
+
+.doc-endpoint { margin-top: 1rem; }
+.doc-endpoint summary { cursor: pointer; color: var(--muted); font-size: 0.9rem; }

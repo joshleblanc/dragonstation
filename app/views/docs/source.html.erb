@@ -1,0 +1,14 @@
+<% content_for :title, "#{@module.name} source" %>
+
+<div class="page-head">
+  <h1><code><%= @module.path %></code></h1>
+  <p class="lede">
+    the library's own source, console <%= @console_version.version %>
+    &middot; <%= link_to "back to #{@module.name}", doc_path(@module.slug) %>
+  </p>
+</div>
+
+<%# Full page, not the reader's 60vh: this is the whole point of the page, and
+    scrolling a page whose content is meant to be scrolled is worse than the
+    capped box the cart reader uses. %>
+<pre class="source full"><%= raw @highlighted %></pre>

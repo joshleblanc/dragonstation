@@ -1,15 +1,19 @@
 require "zip"
 
-# Building console libraries in memory, and reading them from somewhere other
-# than the repository.
+# Building console libraries in memory and installing them the way the app does.
+#
+# Libraries live in ActiveStorage now, so a test that needs one installs it
+# through ConsoleLibraryInstall rather than writing a directory somewhere. There
+# is no scratch directory to redirect and no tree to clean up: ActiveStorage is
+# transactional with the database, and the test database is discarded.
 module ConsoleLibraryTestHelper
   # The smallest thing ConsoleLibraryInstall will accept: an entry point that
   # requires two modules, both present, and a version.rb naming the version.
   #
-  # Built rather than zipped from vendor/console/0.1.0 on purpose -- these tests
-  # are about which version string and which require list get refused, and
-  # copying the real library would make them assert against whatever the
-  # console happens to ship this month.
+  # Built rather than read out of the real console on purpose -- these tests are
+  # about which version string and which require list get refused, and copying
+  # the real library would make them assert against whatever the console happens
+  # to ship this month.
   def console_library_entries(version, extra = {})
     major, minor, patch = version.split(".")
 
@@ -52,43 +56,22 @@ module ConsoleLibraryTestHelper
     @uploads = []
   end
 
-  # Point ConsoleLibrary at a directory other than vendor/console.
+  # Install a library the way the upload screen does, and return the version.
   #
-  # Without this an install test would write a real version directory into the
-  # repository and leave it there, which is both a dirty tree and a test that
-  # passes for the wrong reason the second time.
-  def with_library_root(root)
-    original = redirect_library_root(root)
-    yield
-  ensure
-    restore_library_root(original)
+  # The same path, so a test that needs a console gets the validation the app
+  # applies rather than a hand-built row that could not exist in production.
+  def install_console_library(version, extra = {}, title: nil, notes: nil)
+    upload = console_library_upload(version, extra)
+
+    ConsoleLibraryInstall.new(archive: upload, title: title, notes: notes).call
   end
 
-  # The pair to use from setup/teardown, where the redirect has to hold for
-  # every test rather than for the body of a block. Getting this wrong writes
-  # into the repository, so it is the default for any test that installs.
-  def redirect_library_root(root)
-    original = ConsoleLibrary.method(:root)
-    ConsoleLibrary.define_singleton_method(:root) { Pathname.new(root) }
-    forget_memoized_libraries
-    original
-  end
-
-  def restore_library_root(original)
-    ConsoleLibrary.define_singleton_method(:root, original)
-    forget_memoized_libraries
-  end
-
-  # ConsoleVersion memoizes its library, so a row loaded before the root was
-  # swapped would keep reading the real vendor directory.
-  def forget_memoized_libraries
-    ConsoleVersion.all.each { |version| version.instance_variable_set(:@library, nil) }
-  end
-
-  # The version directories under a root, ignoring anything an install left
-  # behind mid-flight.
-  def installed_versions(root)
-    Dir.children(root).reject { |name| name.start_with?(".") }.sort
+  # A library held in memory rather than in the database, for the tests that
+  # read one directly -- the documentation extractor above all, which needs a
+  # module that will not parse and could not be installed.
+  def candidate_library(version, extra = {})
+    ConsoleLibrary.new(ConsoleVersion.new(version: version),
+      entries: console_library_entries(version, extra))
   end
 end
 

@@ -1,0 +1,114 @@
+<% content_for :title, "Console library" %>
+
+<div class="page-head">
+  <h1>The console library</h1>
+  <p class="lede">
+    Every cart on this site runs against the same library, and it travels with
+    your upload &mdash; there is nothing to install and nothing to require.
+    This is console <%= @console_version.version %><%= ", the version a new upload is pinned to" if @console_version.default? %>.
+  </p>
+</div>
+
+<div class="doc-note">
+  <p>
+    A cart is a directory with a contract: an entry file naming a class after
+    the directory, and whatever art and data it needs beside it. Zip that
+    directory, upload it, publish it. Everything below is what goes in the file.
+  </p>
+</div>
+
+<section class="doc-section" id="get-it">
+  <h2>Get the console</h2>
+  <p>
+    A cart runs on the console: a directory of Ruby, this library, and a small
+    tool that boots it. Unpack the download into a checkout and the library is
+    in place.
+  </p>
+  <p>
+    <% if authenticated? %>
+      <%= link_to "Download it with my publishing key", console_bundle_path, class: "button-link" %>
+      <span class="muted">or <%= link_to "just the library", library_download_path %></span>
+    <% else %>
+      <%= link_to "Download the library", library_download_path, class: "button-link" %>
+      <span class="muted">
+        &mdash; <%= link_to "sign in", new_session_path %> to download it with a
+        key that lets you publish carts from the console.
+      </span>
+    <% end %>
+  </p>
+</section>
+
+<section class="doc-section" id="your-first-cart">
+  <h2>Your first cart</h2>
+  <% @guide.samples.each_with_index do |sample, index| %>
+    <div class="doc-sample" id="<%= sample.id %>">
+      <h3><%= sample.title %></h3>
+      <p><%= sample.note %></p>
+      <pre class="source"><%= raw FileHighlighter.new("sample.rb", sample.code).call %></pre>
+    </div>
+  <% end %>
+</section>
+
+<section class="doc-section" id="hooks">
+  <h2>The hooks</h2>
+  <p class="muted">
+    Every hook is optional. A cart that defines none of them still boots &mdash;
+    it just does nothing.
+  </p>
+  <table class="doc-table">
+    <tbody>
+      <% @guide.hooks.each do |hook| %>
+        <tr>
+          <td><code><%= hook[:name] %></code></td>
+          <td class="doc-when"><%= hook[:when] %></td>
+          <td><%= hook[:note] %></td>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+</section>
+
+<section class="doc-section" id="publishing">
+  <h2>Sending a cart here</h2>
+  <p>
+    No archive to build and no upload form. With the bundle unpacked and your key
+    in it:
+  </p>
+  <pre class="source">./publish-site arcade</pre>
+
+  <ol class="doc-steps">
+    <% @guide.publishing[:steps].each do |step| %>
+      <li><%= step %></li>
+    <% end %>
+  </ol>
+
+  <p class="muted">
+    The same upload, without the browser. Everything the form refuses it refuses
+    &mdash; traversal, symlinks, expansion bombs, art a cart names but does not own
+    &mdash; and it says so in the message.
+  </p>
+
+  <details class="doc-endpoint">
+    <summary>The endpoint, if you are writing your own client</summary>
+    <pre class="source"><%= raw FileHighlighter.new("client.rb", @guide.publishing[:endpoint].join("\n")).call %></pre>
+  </details>
+</section>
+
+<section class="doc-section" id="reference">
+  <h2>The API</h2>
+  <p>
+    <%= pluralize(@modules.size, "module") %>, described by the library's own
+    comments. Nothing here is written by hand, so it cannot drift from the code
+    it describes.
+  </p>
+
+  <ul class="doc-index">
+    <% @modules.each do |mod| %>
+      <li>
+        <%= link_to mod.name, doc_path(mod.slug) %>
+        <span class="doc-index-summary"><%= mod.summary %></span>
+        <span class="muted"><%= pluralize(mod.sections.sum { |s| s.methods.size }, "method") %></span>
+      </li>
+    <% end %>
+  </ul>
+</section>

@@ -2,15 +2,8 @@ require "test_helper"
 
 class Admin::DashboardControllerTest < ActionDispatch::IntegrationTest
   setup do
-    @root = Dir.mktmpdir
-    @original_library_root = redirect_library_root(@root)
     @admin = users(:one)
     @admin.update!(admin: true)
-  end
-
-  teardown do
-    restore_library_root(@original_library_root)
-    FileUtils.rm_rf(@root)
   end
 
   test "an admin sees the overview" do
@@ -60,7 +53,7 @@ class Admin::DashboardControllerTest < ActionDispatch::IntegrationTest
     assert_select ".admin-caution", text: /No console library is installed/
   end
 
-  test "it warns when a version has no directory on disk" do
+  test "it warns when a version has no library files" do
     # The upload form rejects its own submission when there is no library, so
     # this is the page that has to surface it.
     ConsoleVersion.create!(version: "0.1.0")
@@ -70,16 +63,11 @@ class Admin::DashboardControllerTest < ActionDispatch::IntegrationTest
 
     assert_response :success
     assert_select ".admin-caution", text: /cannot be served/
-    assert_select ".state-bad", text: /missing directory/
+    assert_select ".state-bad", text: /no library files/
   end
 
   test "it says nothing alarming when every version is present" do
-    entries = console_library_entries("0.1.0")
-    entries.each do |path, bytes|
-      FileUtils.mkdir_p(File.dirname(File.join(@root, "0.1.0", path)))
-      File.binwrite(File.join(@root, "0.1.0", path), bytes)
-    end
-    ConsoleVersion.create!(version: "0.1.0")
+    console_version!
 
     sign_in_as @admin
     get admin_root_path

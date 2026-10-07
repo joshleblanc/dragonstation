@@ -1,23 +1,26 @@
-# One vendored copy of the console library, as it will be served to the
-# DragonRuby HTML5 build.
+# One console library, as it will be served to the DragonRuby HTML5 build.
 #
 # This is the Ruby half of what console/publish-cart does with a shell script.
 # The script stages a directory so dragonruby-publish has exactly one cart to
-# package; here the staged tree is never written to disk -- it is described,
-# and the description is served as the loader's manifest. The rules the script
+# package; here the library is never a directory at all -- it is a set of blobs
+# attached to a ConsoleVersion row, described by path. The rules the script
 # enforces are the rules this class reproduces:
 #
 #   * the library travels with every cart, because a cart is meaningless
 #     without it;
-#   * the library's own app/main.rb is the require list, read from the real
-#     file rather than duplicated, so a library update cannot leave a stale
+#   * the library's own app/main.rb is the require list, read from the stored
+#     bytes rather than duplicated, so a library update cannot leave a stale
 #     copy of it behind;
 #   * the entry point that gets served pins one cart, so a build that is only
 #     *able* to run that cart is a property of the build.
+#
+# One reader serves both a stored library and a candidate that has not been
+# stored yet: `entries:` names the bytes directly, which is how an uploaded
+# archive is checked before a single row exists for it. The validation below is
+# then the same validation that will run again once the bytes land, because it
+# is this class doing both.
 class ConsoleLibrary
   class Missing < StandardError; end
-
-  ROOT = Rails.root.join("vendor/console")
 
   # The library's own entry point. It is a template, not something that is
   # ever served verbatim: the served version pins a cart.
@@ -33,41 +36,33 @@ class ConsoleLibrary
   REQUIRE_PATTERN = /^require\s+'(app\/console\/[^']+)'\s*$/
 
   # MAJOR/MINOR/PATCH from app/console/version.rb, used to check that the
-  # directory is labelled with the version it actually contains.
+  # library is labelled with the version it actually contains.
   VERSION_CONSTANT = /\b([A-Z]+)\s*=\s*(\d+)\b/
 
   attr_reader :console_version
 
-  # Where the vendored libraries live. A method rather than a bare constant so
-  # a test can point it at a fixture directory and prove that two cartridges
-  # pinned to two versions really do keep serving two different libraries.
-  def self.root = ROOT
-
   # Takes a ConsoleVersion, or a bare version string for callers that are
-  # inspecting a directory that has no row yet -- the install task is exactly
-  # that case, since it has to decide whether to create the row.
+  # inspecting a library that has no row yet -- the install is exactly that
+  # case, since it has to decide which version to create the row under.
   #
-  # `directory:` points the reader at some other tree entirely, which is what
-  # lets an install validate an uploaded archive *before* it is moved into
-  # vendor/console. The rules below are then the same ones that will be checked
-  # once it lands, because it is this class doing both.
-  def initialize(console_version, directory: nil)
+  # `entries:` supplies the bytes directly, as path => String. It is how a
+  # candidate is read before it is stored, and how a test can hold a library
+  # that the database has never seen. With no entries the library is the one
+  # stored against the row.
+  def initialize(console_version, entries: nil)
     @console_version =
       if console_version.is_a?(ConsoleVersion)
         console_version
       else
         ConsoleVersion.new(version: console_version.to_s)
       end
-    @directory = directory
+    @entries = entries&.transform_keys(&:to_s)
   end
 
-  # The version directory this library reads from: the one the caller named, or
-  # the canonical one under vendor/console.
-  def directory = @directory || self.class.root.join(console_version.version)
+  # True when these bytes came from `entries:` rather than from the database.
+  def candidate? = !@entries.nil?
 
-  def entry_path = directory.join(ENTRY_TEMPLATE)
-
-  def available? = entry_path.file?
+  def available? = file?(ENTRY_TEMPLATE)
 
   def entry_source
     @entry_source ||= read(ENTRY_TEMPLATE)
@@ -92,14 +87,33 @@ class ConsoleLibrary
     @fonts ||= FONT_CANDIDATES.select { |f| file?(f) }.freeze
   end
 
-  def file?(relative) = absolute(relative).file?
+  # Every stored path, sorted. This is what the release bundle walks, in place
+  # of the directory listing it used to take.
+  def paths
+    @paths ||= candidate? ? @entries.keys.sort : records.keys.sort
+  end
 
-  def size_of(relative) = absolute(relative).size
+  # Stored paths directly under a top-level directory, sorted.
+  def paths_under(directory)
+    prefix = "#{directory}/"
+
+    paths.select { |path| path.start_with?(prefix) }
+  end
+
+  def file?(relative)
+    lookup(relative) ? true : false
+  end
+
+  def size_of(relative)
+    entry = lookup(relative) or raise_missing(relative)
+
+    candidate? ? entry.bytesize : entry.byte_size
+  end
 
   def read(relative)
-    absolute(relative).binread
-  rescue SystemCallError => e
-    raise Missing, "console #{console_version.version} has no readable #{relative}: #{e.message}"
+    entry = lookup(relative) or raise_missing(relative)
+
+    candidate? ? entry : entry.read
   end
 
   # A stable filetime for every file in this library.
@@ -112,10 +126,10 @@ class ConsoleLibrary
 
   # The version string the library itself claims to be, read from version.rb.
   #
-  # Checked against the directory name on load. A directory copied to the wrong
-  # version name would otherwise be served to every new upload under a label
-  # nobody can reconcile with the code, which is the kind of drift that is only
-  # noticed much later.
+  # Checked against the row's version on load. A library stored under a version
+  # it does not claim would otherwise be served to every new upload under a
+  # label nobody can reconcile with the code, which is the kind of drift that is
+  # only noticed much later.
   def declared_version
     return nil unless file?(MODULE_PREFIX + "version.rb")
 
@@ -123,24 +137,31 @@ class ConsoleLibrary
     %w[MAJOR MINOR PATCH].map { |k| constants[k] }.compact.join(".")
   end
 
-  # True when the directory is labelled with the version it contains.
+  # True when the row is labelled with the version the library contains.
   def label_matches_contents?
     declared = declared_version
     declared.present? && declared == console_version.version
   end
 
   private
-    def absolute(relative)
-      base = directory.expand_path.to_s
-      candidate = Pathname.new(base).join(relative.to_s).expand_path.to_s
+    # Every stored file, keyed by path.
+    def records
+      @records ||= console_version.console_library_files.index_by(&:path)
+    end
 
-      # Containment check. The manifest and the runtime both turn a path from
-      # these lists into a read, and a path that escaped the library directory
-      # would read arbitrary files off the server.
-      unless candidate == base || candidate.start_with?(base + File::SEPARATOR)
-        raise Missing, "console library path escapes the library: #{relative}"
-      end
+    # The bytes behind one path, from wherever this library is being read.
+    #
+    # Containment is not re-checked here, because it cannot need checking: a
+    # candidate is a hash keyed by the exact path, and a stored library is a
+    # row looked up by the same. Neither has a filesystem for a path to escape
+    # into, and a path that names nothing is a miss rather than a traversal.
+    def lookup(relative)
+      path = relative.to_s
 
-      Pathname.new(candidate)
+      candidate? ? @entries[path] : records[path]
+    end
+
+    def raise_missing(relative)
+      raise Missing, "console #{console_version.version} has no readable #{relative}"
     end
 end

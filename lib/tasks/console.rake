@@ -1,8 +1,8 @@
-# Install a vendored console library as a selectable version.
+# Install a console library from a checkout, as a selectable version.
 #
-#   bin/rails console:install                # every library under vendor/console
-#   bin/rails console:install VERSION=0.1.0   # just one
-#   bin/rails console:install VERSION=0.1.0 DEFAULT=true
+#   bin/rails console:install PATH=~/dev/dragonruby/console
+#   bin/rails console:install PATH=~/dev/dragonruby/console DEFAULT=true
+#   bin/rails console:install PATH=~/dev/dragonruby/console FORCE=true
 #
 # This registers libraries that arrived by git. There is also an upload screen
 # at /admin/console_versions/new, which is the same install for a library that
@@ -13,75 +13,69 @@
 # past the task that the screen would refuse, or the reverse. What the screen
 # will not do, and this task can, is *replace* nothing: registering a version
 # that is already installed is idempotent here, while an upload naming an
-# installed version is refused outright. Either way the bytes under
-# vendor/console/<version>/ are never rewritten in place, because a cartridge
-# is pinned to them forever.
+# installed version is refused outright. Either way the bytes behind an
+# installed version are never rewritten in place, because a cartridge is pinned
+# to them forever.
 #
-# The version is read from the library's own app/console/version.rb and checked
-# against the directory name. A directory that says it is 0.2.0 while living at
-# 0.1.0 is refused rather than installed under the wrong label -- every
-# cartridge pinned to that label would then be pinned to something nobody could
-# name.
+# The version is read from the library's own app/console/version.rb. A checkout
+# that says it is 0.2.0 while being offered as 0.1.0 is refused rather than
+# installed under the wrong label -- every cartridge pinned to that label would
+# then be pinned to something nobody could name.
+#
+# The library used to live in vendor/console/<version>/ and this task scanned
+# for it there. It is in storage now, so PATH names the checkout to read.
+# Nothing is written to the repository.
 namespace :console do
-  desc "Register vendored console libraries under vendor/console"
+  desc "Install a console library from a checkout (PATH=/path/to/console)"
   task install: :environment do
-    root = ConsoleLibrary.root
-    requested = ENV["VERSION"].presence
+    path = ENV["PATH"].presence
     make_default = ActiveModel::Type::Boolean.new.cast(ENV.fetch("DEFAULT", "false"))
+    force = ActiveModel::Type::Boolean.new.cast(ENV.fetch("FORCE", "false"))
 
-    abort "console: no vendor/console directory at #{root}" unless root.directory?
+    abort "console: no PATH given. Run: bin/rails console:install PATH=/path/to/console" if path.nil?
 
-    directories =
-      if requested
-        [ root.join(requested) ]
-      else
-        # Dot-prefixed directories are an install staging itself; they are not
-        # libraries, and one left behind by an interrupted upload must not be
-        # mistaken for one.
-        root.children.select { |child| child.directory? && !child.basename.to_s.start_with?(".") }
-      end
+    directory = Pathname.new(File.expand_path(path))
 
-    if directories.empty?
-      abort "console: nothing to install. Put a library under #{root}/<version>/ first."
+    unless directory.directory?
+      abort "console: no directory at #{directory}"
     end
 
-    skipped = []
+    declared, problems = ConsoleLibraryInstall.inspect(directory)
 
-    directories.sort_by { |d| d.basename.to_s }.each do |directory|
-      label = directory.basename.to_s
-      declared, problems = ConsoleLibraryInstall.inspect(directory)
-
-      # A library that is not a library is skipped rather than fatal, so one bad
-      # directory does not stop the rest of a checkout registering. It still
-      # fails the task at the end, because a silent skip reads as success.
-      if problems.any?
-        skipped << label
-        warn "console: SKIP #{label} -- #{problems.join("\nconsole:        ")}"
-        next
-      end
-
-      if declared != label
-        abort "console: ABORT #{label} declares itself #{declared}. " \
-              "Rename the directory to #{declared}, or fix version.rb."
-      end
-
-      record = ConsoleVersion.find_or_initialize_by(version: declared)
-      record.title ||= "Console #{declared}"
-      record.notes = "Installed from #{directory.relative_path_from(Rails.root)}."
-      record.default = true if make_default
-      record.save!
-
-      modules = ConsoleLibrary.new(record).require_paths.size
-
-      puts "console: installed #{declared} (#{modules} modules, " \
-           "fonts: #{ConsoleLibrary.new(record).fonts.join(', ')})" \
-           "#{record.default? ? ' [default]' : ''}"
+    if problems.any?
+      abort "console: #{directory} is not a console library I can install --\nconsole:        " \
+            "#{problems.join("\nconsole:        ")}"
     end
 
-    unless skipped.empty?
-      abort "console: #{skipped.size} #{skipped.size == 1 ? 'directory' : 'directories'} " \
-            "skipped (#{skipped.join(', ')}). Nothing was registered for " \
-            "#{skipped.size == 1 ? 'it' : 'them'}."
+    installed = ConsoleVersion.find_by(version: declared)
+
+    if installed
+      # Re-registering the version that is already there is a no-op, which is
+      # what makes this task safe to run on every deploy. The files are not
+      # rewritten either way -- FORCE says *adopt* the row, not *replace* the
+      # blobs, because replacing them is the thing pinning exists to prevent.
+      installed.title = "Console #{declared}"
+      installed.notes = "Installed from #{directory}."
+      installed.default = true if make_default
+      installed.save!
+
+      puts "console: #{declared} is already installed (#{installed.console_library_files.count} files)"
+      puts "console: NOT rewritten. To change #{declared}, bump MAJOR/MINOR/PATCH in " \
+           "app/console/version.rb and install that instead."
+      abort "console: this build serves #{installed.library.declared_version}, not #{declared}" unless force
+
+      installed
+    else
+      console_version = ConsoleLibraryInstall.new(archive: nil, title: "Console #{declared}").install!(directory)
+
+      ConsoleVersion.where(default: true).where.not(id: console_version.id).update_all(default: false) if make_default
+      console_version.update!(default: true) if make_default
+
+      library = console_version.library
+      puts "console: installed #{declared} " \
+           "(#{library.require_paths.size} modules, fonts: #{library.fonts.join(', ')})" \
+           "#{console_version.default? ? ' [default]' : ''}"
+      console_version
     end
   end
 
@@ -90,11 +84,11 @@ namespace :console do
     versions = ConsoleVersion.order(:version)
 
     if versions.empty?
-      puts "console: none installed. Run: bin/rails console:install"
+      puts "console: none installed. Run: bin/rails console:install PATH=/path/to/console"
     else
       versions.each do |v|
         state =
-          if !v.available?            then "MISSING library directory"
+          if !v.available?            then "MISSING library files"
           elsif !v.library.label_matches_contents? then "MISLABELLED (declares #{v.library.declared_version})"
           else "ok -- #{v.library.require_paths.size} modules"
           end

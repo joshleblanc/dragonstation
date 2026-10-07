@@ -2,8 +2,10 @@
   <a class="brand" href="<%= root_path %>">Dragonstation</a>
 
   <nav class="site-nav">
+    <%= link_to "Docs", docs_path %>
     <% if authenticated? %>
       <%= link_to "Upload a cart", new_cartridge_path %>
+      <%= link_to "Settings", settings_path %>
       <% if Current.user.admin? %><%= link_to "Admin", admin_root_path %><% end %>
       <span class="who">
         <%= Current.user.username %>

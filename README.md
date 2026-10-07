@@ -76,6 +76,129 @@ published comes from the bytes that will actually be returned, and there is a
 test that fetches every file over HTTP and compares it to the number the
 manifest declared.
 
+## Installing and publishing from the console
+
+The console in `~/dev/dragonruby/console` and this site are two halves of one
+workflow, and both halves can be done from a terminal:
+
+```
+GET  /console/library.zip    the library alone, public
+GET  /console/bundle.zip     the library plus the reader's key, behind login
+POST /api/carts              publish a cart, authenticated by that key
+```
+
+**The library is public on purpose.** This site already serves every byte of it
+to any browser running a cart -- it is in the manifest and in `gamedata` -- so a
+second copy behind a login would imply a restriction that does not exist, and
+would break `./update-library` in a terminal that has no session to log in with.
+The key is the opposite: it belongs to one account.
+
+**The download is a console, not a library.** The first version of it shipped
+only what a browser needs to run a cart, which left whoever unpacked it with a
+directory of Ruby and nothing to run it with. `LibraryBundle` now serves the
+whole release vendored under `vendor/console/<version>/`: the entry point, every
+script under `bin/` (shell and `.bat`), the starter art, the metadata, the
+README, and a `carts/` directory with a README in it. Unpacking it over a
+checkout gives you a console that boots.
+
+Two details that took a test to find: the ZIP carries **Unix modes**, because a
+console whose scripts arrive non-executable is a console that cannot be run --
+and `errors/last.txt`, `builds/` and one reader's `dragonstation.json` are
+excluded, because they are that machine's state rather than the console's.
+
+That vendored tree is a copy of `~/dev/dragonruby/console`, and keeping it
+honest is manual: when the console moves, so does this copy. `vendor/console/`
+is deliberately not wired into autoloading -- it is data, served, not code.
+
+**The key is stored as a digest and nowhere else.** A SHA-256 digest, because a
+key has to be *looked up* by the thing it authenticates -- a salted bcrypt digest
+cannot answer "is this the key?" without checking every row, which is only
+affordable for a password because there is one password to check. The entropy
+is 32 bytes of `SecureRandom`.
+
+That has one consequence worth stating plainly: **every personal download issues
+a new key and retires the last one**, because the download is the only place the
+secret exists. A console holding a retired key is refused with a 401 and told
+what to do. The alternative -- encrypting the secret so it can be re-shipped --
+needs record encryption keys this deployment does not have, and a key nobody can
+read is worse than one they have to fetch twice.
+
+**One key per account.** Issuing a new one replaces the old, which is also how a
+leaked key is retired; there is no separate revoke, because with one key at a
+time "give me a new one" and "this one is dead" are the same request.
+
+`vendor/console/<version>/` is now a console release rather than a bare library,
+so `ConsoleLibrary#file_paths` (the manifest, from `app/main.rb`'s require list)
+and `LibraryBundle#release_paths` (the download, everything a person needs) are
+deliberately different sets. The runtime must serve exactly what it requires; the
+download should carry the source.
+
+**Releasing a console is the same shape, for administrators.**
+`POST /api/console_versions` runs `ConsoleLibraryInstall` on an uploaded ZIP, and
+the credential is resolved to its owner and checked for admin **on every
+request**. `403` for an ordinary member, not `401` -- the key was fine, the
+account was not allowed. Installing a version never makes it the default and
+never moves a cartridge: two decisions, both a person's.
+
+The release script is only in an administrator's download, and the public
+library -- which is what `./update-library` pulls -- never carries it. That is a
+courtesy, not a control: the file being absent is not the thing stopping
+anybody, the endpoint is.
+
+**Publishing reuses the browser's upload.** `Api::CartsController` hands the
+archive straight to `CartridgeIngest`, so traversal, symlinks, expansion bombs
+and art-a-cart-names-but-does-not-own are all refused exactly as the form
+refuses them -- and it arrives as a *draft*, because publishing stays a decision
+a person makes after seeing the cart run. The only thing the API adds is who the
+cart belongs to, which is what the key decides. `Current.user` falls back to the
+key's owner, so every other check in the app works unchanged for a key.
+
+An unknown key is a 401, never a redirect to a sign-in form a terminal cannot
+answer, and refusals come back as JSON `problems` because the caller is a
+script.
+
+## Documentation
+
+`/docs` is the console library's documentation, and it is public: it is the
+reason anyone would upload a cart, and an author needs it before they have an
+account.
+
+It is built from two sources, and the split is the design:
+
+- **The reference is read out of the library's own comments**
+  ([ConsoleDocumentation](app/services/console_documentation.rb)). Every module
+  has a header explaining what it is for and nearly every method has a comment
+  saying what it does and why. Those comments are maintained alongside the code
+  by whoever changed it last; a hand-written copy would be a second source of
+  truth that is wrong within a release, and wrong *silently*, because stale
+  docs still read as docs. So nothing here is written by hand &mdash; Ripper
+  supplies the structure and the lexer supplies the comments, which Ruby does
+  not keep in the parse tree. Nothing is evaluated: the library needs
+  DragonRuby's `DR` and `$args`, and documentation must not depend on running
+  the thing it describes.
+
+  The library's own `# --- heading ---` dividers become section headings,
+  because the grouping its author chose is more useful to a reader than any
+  order this site could invent. Indented runs inside a comment become
+  highlighted code, which is how the library writes its usage samples &mdash; the
+  header of `cart_loader.rb` *is* the cart contract.
+
+- **The guide is written here** ([ConsoleGuide](app/services/console_guide.rb)),
+  because what a cart is and how to start one is not written down in the
+  library. Five worked examples, each the smallest thing that does the job,
+  plus the hooks table. There is a test that every call in them exists in the
+  library, and another that every one of them parses as Ruby &mdash; a sample
+  that invents a method is worse than no sample, because it reads as
+  authoritative.
+
+Every module page links its source, highlighted, served from the library
+directory &mdash; so it is the same file the game runs. Docs that cannot be
+checked against the implementation are a guess.
+
+Both describe the **default** console version, and every page says which one. A
+cart is pinned to a version, so a mismatch is a real possibility and a silent
+one would be indistinguishable from a bug in the library.
+
 ## Reading a cart's files
 
 The cart's page lists what is in the cart, and everything readable opens **in

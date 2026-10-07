@@ -2,17 +2,11 @@ require "test_helper"
 
 class Admin::ConsoleVersionsControllerTest < ActionDispatch::IntegrationTest
   setup do
-    @root = Dir.mktmpdir
-    @original_library_root = redirect_library_root(@root)
     @admin = users(:one)
     @admin.update!(admin: true)
   end
 
-  teardown do
-    cleanup_uploads
-    restore_library_root(@original_library_root)
-    FileUtils.rm_rf(@root)
-  end
+  teardown { cleanup_uploads }
 
   # --- who gets in -----------------------------------------------------
 
@@ -74,24 +68,24 @@ class Admin::ConsoleVersionsControllerTest < ActionDispatch::IntegrationTest
     assert_select "td", text: /Nothing installed/
   end
 
-  test "a version whose directory is missing renders rather than raising" do
+  test "a version with no library files renders rather than raising" do
     # A row can outlive its files, and an admin page that raised on one would be
     # useless exactly when it is needed.
-    ConsoleVersion.create!(version: "9.9.9")
+    version = ConsoleVersion.create!(version: "9.9.9")
 
     sign_in_as @admin
-    get admin_console_version_path(ConsoleVersion.find_by!(version: "9.9.9"))
+    get admin_console_version_path(version)
 
     assert_response :success
-    assert_select ".state-bad", text: /missing directory/
+    assert_select ".state-bad", text: /no library files/
   end
 
   test "the version page survives a library that lost a file" do
-    # main.rb still names it, so the require list is intact and the directory is
+    # main.rb still names it, so the require list is intact and the library is
     # not gone -- but the bytes are. A page that raised here would be useless
     # exactly when it is needed.
     version = installed_version!("0.1.0")
-    FileUtils.rm(File.join(@root, "0.1.0", "app", "console", "core.rb"))
+    version.console_library_files.find_by!(path: "app/console/core.rb").destroy!
 
     sign_in_as @admin
     get admin_console_version_path(version)
@@ -210,12 +204,8 @@ class Admin::ConsoleVersionsControllerTest < ActionDispatch::IntegrationTest
   end
 
   private
+    # A version with a real library behind it, installed the way the app does.
     def installed_version!(version)
-      entries = console_library_entries(version)
-      FileUtils.mkdir_p(File.join(@root, version, "app", "console"))
-      entries.each do |path, bytes|
-        File.binwrite(File.join(@root, version, path), bytes)
-      end
-      ConsoleVersion.create!(version: version, title: "Console #{version}")
+      install_console_library(version, {}, title: "Console #{version}")
     end
 end

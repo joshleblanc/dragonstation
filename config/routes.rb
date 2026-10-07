@@ -9,6 +9,34 @@ Rails.application.routes.draw do
     patch :publish, on: :member
   end
 
+  # Account settings: the publishing key and the console download. Behind the
+  # login, because the download it produces carries that account's key.
+  resource :settings, only: %i[show]
+  post "settings/api_key", to: "settings#rotate_api_key", as: :settings_api_key
+
+  # Handing the library to a console. The library is open -- the site serves
+  # every byte of it to run a cart anyway -- and the bundle additionally carries
+  # the reader's API key, so it is behind the login it belongs to.
+  get "console/library.zip", to: "downloads#library", as: :library_download
+  get "console/bundle.zip", to: "downloads#bundle", as: :console_bundle
+
+  # Publishing a cart from the console. Key-authenticated, so it carries no
+  # session and no CSRF token: the Authorization header is the credential and
+  # a cross-site form post cannot set one.
+  post "api/carts", to: "api/carts#create"
+
+  # Releasing a new console version. Same door, and the same key; the difference
+  # is that this one needs an administrator's key, checked per request.
+  post "api/console_versions", to: "api/console_versions#create"
+
+  # The console library's documentation. Public: it is the reason anyone uploads
+  # a cart, and an author needs it before they have an account. Declared before
+  # the cartridge routes below only because "/docs/..." and "/cartridges/..."
+  # could not collide anyway -- this one is a fixed prefix.
+  get "docs", to: "docs#index", as: :docs
+  get "docs/:slug/source", to: "docs#source", as: :doc_source
+  get "docs/:slug", to: "docs#show", as: :doc
+
   # One file of a cart, read as text. The path rides in the query string, not
   # the route, because Turbo will not navigate a URL whose last segment ends in
   # one of ~60 extensions (.png, .json, .txt, .wav...) -- it leaves those to the

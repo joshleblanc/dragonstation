@@ -11,7 +11,7 @@
     end
 %>
 <% if !version.available? %>
-  <span class="state state-bad">missing directory</span>
+  <span class="state state-bad">no library files</span>
 <% elsif declared.blank? || declared != version.version %>
   <span class="state state-warn">mislabelled &mdash; says <%= declared.presence || "nothing" %></span>
 <% else %>

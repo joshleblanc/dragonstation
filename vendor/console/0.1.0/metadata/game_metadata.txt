@@ -1,8 +1,0 @@
-devid=dragonruby
-devtitle=Console
-gameid=console
-gametitle=Console
-version=1.0
-icon=metadata/icon.png
-hd=false
-highdpi=false

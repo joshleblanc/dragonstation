@@ -1,6 +1,14 @@
 # Omakase Ruby styling for Rails
 inherit_gem: { rubocop-rails-omakase: rubocop.yml }
 
+# Fixtures are data, not code. Some are deliberately wrong -- the console
+# library fixture holds a file that will not parse, because the documentation
+# reader has to survive one -- and their contents are dictated by the format
+# they stand in for rather than by this project's style.
+AllCops:
+  Exclude:
+    - "test/fixtures/**/*"
+
 # Overwrite or add rules to create your own house style
 #
 # # Use `[a, [b, c]]` not `[ a, [ b, c ] ]`
