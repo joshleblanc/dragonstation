@@ -1,0 +1,59 @@
+<% content_for :title, "Console library" %>
+
+<div class="admin-head">
+  <div>
+    <h1>Console library</h1>
+    <p class="lede">
+      <%= pluralize(@versions.size, "version") %> installed. New cartridges are
+      pinned to the version they are uploaded against, so changing the library
+      never changes how a published game runs.
+    </p>
+  </div>
+  <%= link_to "Upload a new version", new_admin_console_version_path, class: "secondary" %>
+</div>
+
+<table class="admin-table">
+  <thead>
+    <tr>
+      <th>Version</th>
+      <th>State</th>
+      <th class="num">Modules</th>
+      <th class="num">Fonts</th>
+      <th class="num">Pinned cartridges</th>
+    </tr>
+  </thead>
+  <tbody>
+    <% @versions.each do |version| %>
+      <tr>
+        <td>
+          <%= link_to version.version, admin_console_version_path(version) %>
+          <% if version == @default %>
+            <span class="state state-ok">default</span>
+          <% end %>
+          <div class="muted"><%= version.title %></div>
+        </td>
+        <td><%= render "admin/console_versions/state", version: version %></td>
+        <%# A plain em dash rather than &mdash;: an HTML entity inside a Ruby expression
+    is a syntax error, and this cell is an expression. %>
+        <td class="num"><%= version.available? ? version.library.require_paths.size : "—" %></td>
+        <td class="num"><%= version.available? ? version.library.fonts.size : "—" %></td>
+        <td class="num"><%= version.cartridges.size %></td>
+      </tr>
+    <% end %>
+
+    <% if @versions.empty? %>
+      <tr>
+        <td colspan="5" class="muted">
+          Nothing installed. Put a library under <code>vendor/console/&lt;version&gt;/</code>
+          and run <code>bin/rails console:install</code>, or upload a ZIP.
+        </td>
+      </tr>
+    <% end %>
+  </tbody>
+</table>
+
+<p class="muted">
+  A version that is already installed is never replaced. To ship a change, bump
+  the MAJOR/MINOR/PATCH constants in the library&rsquo;s own
+  <code>app/console/version.rb</code> and upload it again as a new version.
+</p>

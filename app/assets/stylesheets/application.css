@@ -167,6 +167,79 @@ code {
 .file-table { width: 100%; border-collapse: collapse; margin-top: 0.75rem; font-size: 0.88rem; }
 .file-table td { padding: 0.3rem 0.5rem; border-bottom: 1px solid var(--line); }
 .file-table td:first-child { width: 100%; }
+/* The first column takes the slack, so keep a size on one line rather than
+   letting it wrap into a second row of its own. */
+.file-table .num { white-space: nowrap; }
+
+/* --- one file, read --------------------------------------------------- */
+
+/* The viewer lives inside the file list, on a page that also holds a running
+   game. An empty frame takes no room at all; a loaded one is capped and
+   scrolls, so reading a 3000-line file does not push the rest of the page off
+   the screen. */
+#file_viewer:empty { display: none; }
+#file_viewer { display: block; margin-top: 0.75rem; }
+
+.file-viewer-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.4rem 0.6rem;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-bottom: 0;
+  border-radius: var(--radius) var(--radius) 0 0;
+  font-size: 0.85rem;
+}
+.file-viewer-head .muted { margin-left: auto; }
+.file-viewer-close { font-size: 0.85rem; white-space: nowrap; }
+
+.source {
+  margin: 0;
+  padding: 1rem;
+  max-height: 60vh;
+  overflow: auto;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 0 0 var(--radius) var(--radius);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  white-space: pre;
+}
+
+/* Rouge's shortnames: k keyword, s string, c1 comment, and so on. Colours live
+   here rather than inline so the reader is themed like the rest of the site,
+   and keyed off the accent the page already has. */
+.source .k, .source .kd, .source .kn, .source .kp, .source .kr, .source .kt { color: var(--accent); }
+.source .c, .source .c1, .source .cm, .source .cp, .source .cs { color: #6f7c92; font-style: italic; }
+.source .s, .source .s1, .source .s2, .source .sb, .source .sc, .source .sd,
+.source .se, .source .sh, .source .si, .source .sx, .source .sr, .source .ss { color: #9ece6a; }
+.source .m, .source .mf, .source .mh, .source .mi, .source .il, .source .mo { color: #ff9e64; }
+.source .nf, .source .fm { color: #7aa2f7; }
+.source .nc, .source .nn, .source .no, .source .nd, .source .ni, .source .ne,
+.source .nl, .source .py, .source .nv, .source .vc, .source .vg, .source .vi { color: #7dcfff; }
+.source .nb, .source .bp { color: #bb9af7; }
+.source .kc, .source .kd { color: #e0af68; }
+.source .o, .source .ow { color: #a9b4c7; }
+.source .p { color: #8b95a7; }
+.source .err { color: var(--danger); }
+/* Diff tokens, for a cart whose source is a patch. */
+.source .gi { color: #9ece6a; }
+.source .gd { color: var(--danger); }
+.source .gh, .source .gu { color: var(--accent); font-weight: 600; }
+.source .ge { font-style: italic; }
+.source .gs { font-weight: 600; }
+
+.file-image { margin: 0; }
+.file-image img {
+  max-width: 100%;
+  /* Sprites are small and read better at their own size than blown up. */
+  image-rendering: pixelated;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
 
 /* --- forms ----------------------------------------------------------- */
 

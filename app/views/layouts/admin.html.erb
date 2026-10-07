@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title><%= content_for(:title) || "Admin" %> &mdash; Dragonstation</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <%= csrf_meta_tags %>
+    <%= csp_meta_tag %>
+
+    <%= yield :head %>
+
+    <link rel="icon" href="/icon.png" type="image/png">
+    <link rel="icon" href="/icon.svg" type="image/svg+xml">
+
+    <%# The site's own sheet first -- the header, nav and flash are shared, and
+        duplicating them here would let the two drift. admin.css then adds only
+        what is specific to an operator screen, and public pages never load it. %>
+    <%= stylesheet_link_tag :application, :admin, "data-turbo-track": "reload" %>
+    <%= javascript_importmap_tags %>
+  </head>
+
+  <body class="admin-body">
+    <header class="site-header">
+      <a class="brand" href="<%= root_path %>">Dragonstation</a>
+
+      <nav class="site-nav">
+        <nav class="admin-nav">
+          <%= link_to "Overview", admin_root_path %>
+          <%= link_to "Console library", admin_console_versions_path %>
+        </nav>
+        <span class="who">
+          <%= Current.user.username %>
+          <span class="badge">admin</span>
+        </span>
+        <%= button_to "Sign out", session_path, method: :delete, class: "link-button" %>
+      </nav>
+    </header>
+
+    <main class="site-main">
+      <% if flash[:notice] %>
+        <p class="flash flash-notice"><%= flash[:notice] %></p>
+      <% end %>
+      <% if flash[:alert] %>
+        <pre class="flash flash-alert"><%= flash[:alert] %></pre>
+      <% end %>
+
+      <%= yield %>
+    </main>
+  </body>
+</html>

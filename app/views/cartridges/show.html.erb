@@ -56,12 +56,27 @@
     <tbody>
       <% @cartridge.cartridge_files.ordered.each do |file| %>
         <tr>
-          <td><code><%= file.path %></code></td>
+          <td>
+            <% if file.previewable? %>
+              <%# Targeted at the frame below, so the file opens here rather than
+                  navigating: this page is holding a running game in a permanent
+                  iframe, and a visit would rebuild the whole wasm runtime. %>
+              <%= link_to file.path, cartridge_file_path(@cartridge.slug, path: file.path),
+                    class: "file-link", data: { turbo_frame: "file_viewer" } %>
+            <% else %>
+              <code><%= file.path %></code>
+            <% end %>
+          </td>
           <td class="num"><%= number_to_human_size(file.byte_size) %></td>
         </tr>
       <% end %>
     </tbody>
   </table>
+
+  <%# Where a file opens. Empty until something is clicked, and the only place
+      a visit would have been. %>
+  <%= turbo_frame_tag "file_viewer" %>
+
   <p class="muted">
     Plus the console <%= @cartridge.console_version.version %> library
     (<%= @cartridge.console_version.library.require_paths.size %> modules) and both fonts, served on every run.

@@ -18,6 +18,7 @@
 # stops the build from booting anything else if a second one ever appears.
 class CartridgeRuntimeController < ApplicationController
   include CrossOriginIsolation
+  include CartridgeVisibility
 
   # The HTML5 build, copied from a DragonRuby html5 publish. Serving it from
   # here rather than from public/ is what keeps every request relative to the
@@ -136,18 +137,10 @@ class CartridgeRuntimeController < ApplicationController
     def load_cartridge
       @cartridge = Cartridge.find_by!(slug: params[:cartridge_id])
 
-      # allow_unauthenticated_access skips require_authentication, and that
-      # callback is also what populates Current.session from the cookie. So the
-      # session has to be resumed explicitly here, or a signed-in owner looks
-      # anonymous and is denied their own draft.
-      current_user_if_signed_in
-
       # A draft is visible to the person writing it and to nobody else. The
       # runtime path is public, so this is the only thing standing between an
       # unpublished game and the internet.
-      unless @cartridge.published?
-        head :not_found unless Current.user && (Current.user.admin? || Current.user == @cartridge.user)
-      end
+      head :not_found unless visible_cartridge?
     end
 
     def bytes_for(file)

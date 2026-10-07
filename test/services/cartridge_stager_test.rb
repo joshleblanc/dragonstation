@@ -193,15 +193,7 @@ class CartridgeStagerTest < ActiveSupport::TestCase
       File.binwrite(File.join(root, version, "metadata", "icon.png"), "\x89PNG\r\n\x1A\n #{marker}")
     end
 
-    def with_library_root(root)
-      original = ConsoleLibrary.method(:root)
-      ConsoleLibrary.define_singleton_method(:root) { Pathname.new(root) }
-      # ConsoleVersion memoizes its library, and rows created before the swap
-      # would otherwise hold one built against the real vendor directory.
-      ConsoleVersion.all.each { |v| v.instance_variable_set(:@library, nil) }
-      yield
-    ensure
-      ConsoleLibrary.define_singleton_method(:root, original)
-      ConsoleVersion.all.each { |v| v.instance_variable_set(:@library, nil) }
-    end
+  # ConsoleLibraryTestHelper#with_library_root does the swap, including
+  # clearing ConsoleVersion's memoized library so a row loaded before the
+  # swap cannot keep reading the real vendor directory.
 end

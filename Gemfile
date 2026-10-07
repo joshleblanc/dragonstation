@@ -47,6 +47,14 @@ gem "image_processing", "~> 1.2"
 # drops it, and nothing else in the app guarantees it is present.
 gem "rubyzip", "~> 3.7", require: false
 
+# Highlights the source the cart file reader prints. Server-side on purpose: the
+# file arrives inside a Turbo frame as HTML, so marking it up here means no
+# JavaScript at all, and it still works with scripting turned off. Rouge escapes
+# the text it is given and adds its own spans, so the markup it returns is safe
+# to render as-is -- which is the only reason the reader marks anything
+# html_safe.
+gem "rouge", "~> 5.1"
+
 group :development, :test do
   # See https://guides.rubyonrails.org/debugging_rails_applications.html#debugging-with-the-debug-gem
   gem "debug", platforms: %i[ mri windows ], require: "debug/prelude"

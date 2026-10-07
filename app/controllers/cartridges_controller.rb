@@ -1,5 +1,6 @@
 class CartridgesController < ApplicationController
   include CrossOriginIsolation
+  include CartridgeVisibility
 
   # Browsing and playing are public. Uploading is not.
   allow_unauthenticated_access only: %i[index show]
@@ -13,9 +14,8 @@ class CartridgesController < ApplicationController
   end
 
   def show
-    # Public, but a draft is only visible to the person who wrote it -- so the
-    # session has to be resolved even though require_authentication is skipped.
-    current_user_if_signed_in
+    # Public, but a draft is only visible to the person who wrote it -- which
+    # visible_cartridge? decides, resolving the session for us.
 
     # has_one_attached is backed by an ActiveStorage::Attachment, so the preload
     # path is blob_attachment -> blob. includes(cartridge_files: :blob) raises,
@@ -24,9 +24,7 @@ class CartridgesController < ApplicationController
       .includes(:user, :console_version, cartridge_files: { blob_attachment: :blob })
       .find_by!(slug: params[:slug])
 
-    unless @cartridge.published? || owner?
-      return head :not_found
-    end
+    return head :not_found unless visible_cartridge?
 
     @owned = owner?
   end

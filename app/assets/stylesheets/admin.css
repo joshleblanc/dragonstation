@@ -1,0 +1,142 @@
+/* Operator screens.
+ *
+ * Loaded after application.css, which owns the reset, the palette and the
+ * header. Nothing here redefines those: only what an admin page adds, so the
+ * two sheets cannot disagree about what --panel or --muted mean.
+ */
+
+.admin-body .site-header {
+  border-bottom-color: var(--accent-ink);
+}
+
+.admin-nav {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding-right: 1rem;
+  margin-right: 0.25rem;
+  border-right: 1px solid var(--line);
+}
+
+.admin-nav a {
+  color: var(--muted);
+  font-size: 0.9em;
+}
+
+.admin-nav a:hover { color: var(--ink); }
+
+.admin-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.admin-head h1 {
+  margin: 0 0 0.3rem;
+  font-size: 1.6rem;
+}
+
+.admin-head .lede { margin: 0; }
+
+/* A row of numbers that reads as a row of numbers. */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: 0.75rem;
+  margin: 0 0 2rem;
+}
+
+.stat {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 0.9rem 1rem;
+}
+
+.stat dt {
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 0 0 0.35rem;
+}
+
+.stat dd {
+  margin: 0;
+  font-size: 1.7rem;
+  line-height: 1.1;
+}
+
+/* Tables here are the point of the page, so they get to be dense. */
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+  margin-bottom: 1rem;
+}
+
+.admin-table th {
+  text-align: left;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 0.45rem 0.6rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.admin-table td {
+  padding: 0.55rem 0.6rem;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+
+.admin-table .num { text-align: right; }
+
+/* A state badge that says which of three things is true, so a missing library
+ * directory cannot read as an ordinary row. */
+.state {
+  display: inline-block;
+  font-size: 0.75rem;
+  padding: 0.12rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.state-ok { color: #b7e8c4; border-color: #2c5c37; background: #17311f; }
+.state-warn { color: var(--accent); border-color: #6b5220; background: #2a2113; }
+.state-bad { color: var(--danger); border-color: #6b2b2b; background: #2b1717; }
+
+.admin-section { margin-bottom: 2.25rem; }
+.admin-section h2 { font-size: 1.05rem; margin: 0 0 0.7rem; }
+
+.admin-actions {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 1.25rem 0;
+}
+
+/* The warning that an uploaded library becomes code every cartridge on that
+ * version runs. */
+.admin-caution {
+  border: 1px solid #6b5220;
+  background: #2a2113;
+  color: var(--accent);
+  border-radius: var(--radius);
+  padding: 0.85rem 1rem;
+  margin: 0 0 1.5rem;
+  font-size: 0.88rem;
+}
+
+.admin-caution strong { color: var(--accent); }
+
+.admin-caution p { margin: 0 0 0.5rem; }
+.admin-caution p:last-child { margin-bottom: 0; }

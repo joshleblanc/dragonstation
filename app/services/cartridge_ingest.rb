@@ -1,10 +1,7 @@
-# rubyzip is a transitive dependency of activestorage, and Bundler.require only
-# requires the gems named in the Gemfile -- not their dependencies. ActiveStorage
-# requires zip lazily, deep inside archive analysis, which is a different code
-# path from ours. So nothing else loads it: without this line, Zip is defined in
-# the test process (the test helper requires it) and undefined everywhere else,
-# which is a 500 on the first real upload and a green test suite.
-require "zip"
+# rubyzip is required by SafeArchive, which is where Zip::File is actually
+# called. Including it here autoloads the module, so this file still pulls zip
+# in on its own -- there is a test that boots the app alone and checks exactly
+# that, because nothing else in a real request would have loaded it.
 
 # Turn an uploaded ZIP into a cartridge, or explain why it is not one.
 #
@@ -24,14 +21,12 @@ require "zip"
 # them the hard way, on a build that shipped with an invisible sprite, and the
 # failure mode is invisible at every layer above it.
 class CartridgeIngest
-  class Invalid < StandardError
-    attr_reader :problems
-
-    def initialize(problems)
-      @problems = Array(problems)
-      super(@problems.join("\n"))
-    end
-  end
+  # The traversal, symlink and expansion refusals live in SafeArchive, because
+  # a console library install takes an archive from a browser too and needs
+  # exactly the same four guards. Inheriting from its Rejected keeps
+  # `rescue CartridgeIngest::Invalid` working for the controller, and keeps
+  # `problems` available for the form to render.
+  class Invalid < SafeArchive::Rejected; end
 
   # A cart's own directories. publish-cart greps the source for quoted paths
   # under these roots and refuses to package when one does not resolve inside
@@ -47,14 +42,16 @@ class CartridgeIngest
   # Directories whose presence means a cart is not self-contained. DragonRuby
   # resolves paths against the game root and refuses to stat outside it, so a
   # cart reaching for ../ is broken in a way no upload-time check can fix.
-  MAX_FILES = 512
-  MAX_TOTAL_BYTES = 32 * 1024 * 1024
-  MAX_COMPRESSION_RATIO = 200
+  MAX_FILES = SafeArchive::MAX_FILES
+  MAX_TOTAL_BYTES = SafeArchive::MAX_TOTAL_BYTES
+  MAX_COMPRESSION_RATIO = SafeArchive::MAX_COMPRESSION_RATIO
 
   # The console's own diagnostic cart names paths that deliberately do not
   # resolve, because it is the thing testing resolution. publish-cart exempts
   # it by name, and so does this.
   DIAGNOSTIC_CART_NAMES = %w[selftest].freeze
+
+  include SafeArchive
 
   attr_reader :archive, :user, :console_version, :title
 
@@ -78,79 +75,7 @@ class CartridgeIngest
   end
 
   private
-    # name (relative to the cart) => bytes
-    def read_entries
-      entries = {}
-
-      with_zip do |zip|
-        zip.each do |entry|
-          next if entry.directory?
-
-          path = safe_path(entry.name)
-          raise Invalid, "archive contains a symbolic link: #{entry.name}" if symlink?(entry)
-
-          bytes = entry.get_input_stream { |io| io.read }
-
-          check_budget!(entries, path, entry, bytes)
-          entries[path] = bytes
-        end
-      end
-
-      raise Invalid, "archive is empty" if entries.empty?
-
-      entries
-    end
-
-    # The archive reader, behind a method so a test can supply an entry
-    # rubyzip will not produce. rubyzip 3.7 always writes ftype :file, even
-    # with the symlink bit set, so a symlink archive cannot be built through
-    # it -- but archives come from other tools, and the guard below has to
-    # hold for those too.
-    def with_zip(&block)
-      Zip::File.open_buffer(StringIO.new(archive.read), &block)
-    rescue Zip::Error => e
-      raise Invalid, "could not read the archive: #{e.message}"
-    end
-
-    # The one path rule that matters for an archive: nothing may escape the
-    # directory it was extracted into. Absolute paths, '..' segments and
-    # backslashes are all the same attack wearing different clothes.
-    def safe_path(name)
-      raise Invalid, "archive contains an absolute path: #{name}" if name.start_with?("/", "\\")
-
-      normalised = name.tr("\\", "/")
-      segments = normalised.split("/").reject { |s| s.empty? || s == "." }
-
-      if segments.any? { |s| s == ".." }
-        raise Invalid, "archive contains a path that escapes the cart: #{name}"
-      end
-
-      if normalised =~ /\0/
-        raise Invalid, "archive contains a null byte in a path"
-      end
-
-      segments.join("/")
-    end
-
-    def symlink?(entry)
-      entry.respond_to?(:symlink?) ? entry.symlink? : entry.ftype == :symlink
-    rescue NoMethodError
-      false
-    end
-
-    def check_budget!(entries, path, entry, bytes)
-      if entries.size >= MAX_FILES
-        raise Invalid, "archive has more than #{MAX_FILES} files"
-      end
-
-      compressed = entry.compressed_size.to_i
-      if compressed.positive? && bytes.bytesize / compressed > MAX_COMPRESSION_RATIO
-        raise Invalid, "#{path} expands #{MAX_COMPRESSION_RATIO}x beyond its compressed size"
-      end
-
-      total = entries.values.sum(&:bytesize) + bytes.bytesize
-      raise Invalid, "archive expands beyond #{MAX_TOTAL_BYTES / 1024 / 1024}MB" if total > MAX_TOTAL_BYTES
-    end
+    def archive_subject = "cart"
 
     # Find the one cart directory, whether the archive wraps it or *is* it.
     #

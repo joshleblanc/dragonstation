@@ -1,0 +1,74 @@
+<% content_for :title, "Upload a console library" %>
+
+<div class="admin-head">
+  <div>
+    <h1>Upload a console library</h1>
+    <p class="lede">
+      Zip a console directory &mdash; the one holding <code>app/main.rb</code>
+      and <code>app/console/</code> &mdash; and install it as a new version.
+    </p>
+  </div>
+  <%= link_to "All versions", admin_console_versions_path, class: "secondary" %>
+</div>
+
+<%# Stated before the form, not in the help text under it, because it is the one
+    rule that makes this safe and it is the one that will be the most annoying
+    the first time somebody tries to fix a library in place. %>
+<div class="admin-caution">
+  <p>
+    <strong>This installs a version that does not exist yet. It will not
+    overwrite one that does.</strong>
+  </p>
+  <p>
+    Every cartridge is pinned to the library it was uploaded against, forever.
+    Replacing an installed version would change the code those games run while
+    leaving every pin looking intact &mdash; and a leaderboard whose runs stopped
+    being comparable would not say so anywhere. To ship a change, bump the
+    MAJOR/MINOR/PATCH constants in the library&rsquo;s own
+    <code>app/console/version.rb</code> and upload it again.
+  </p>
+</div>
+
+<%= form_with url: admin_console_versions_path, scope: :console_library_install,
+      method: :post, class: "upload-form" do |f| %>
+  <div class="field">
+    <%= f.label :archive, "Console library (.zip)" %>
+    <%= f.file_field :archive, accept: ".zip,application/zip", required: true %>
+    <p class="muted">
+      The archive may contain the library directory or be the library itself.
+      Both are fine; two libraries in one archive is an error.
+    </p>
+  </div>
+
+  <div class="field">
+    <%= f.label :title, "Title" %>
+    <%= f.text_field :title, placeholder: "left blank, \"Console <version>\" is used" %>
+  </div>
+
+  <div class="field">
+    <%= f.label :notes, "Notes" %>
+    <%= f.text_field :notes, placeholder: "what changed in this version" %>
+  </div>
+
+  <%# Same reasoning as the cartridge upload form: a failed install re-renders
+      with the problems, and a file input cannot be repopulated, so the error is
+      shown as a pre-formatted block above instead. %>
+  <%= f.submit "Install" %>
+<% end %>
+
+<div class="upload-help">
+  <h2>What gets checked</h2>
+  <ul>
+    <li><code>app/main.rb</code> exists and requires at least one module under <code>app/console/</code>.</li>
+    <li>Every module it requires is <strong>present in the archive</strong>. A missing one is a cartridge that boots and then fails.</li>
+    <li>Every required path is a <code>.rb</code> module directly under <code>app/console/</code>. That require list is exactly what gets served to the browser for every cartridge on this version, so it cannot be used to add markup.</li>
+    <li><code>app/console/version.rb</code> yields a MAJOR.MINOR.PATCH string, and that string names the directory &mdash; an archive cannot be installed under a label it disagrees with.</li>
+    <li>That version is not already installed, and no cartridge is pinned to it.</li>
+    <li>No absolute paths, no <code>..</code> segments, no symlinks, and the archive cannot expand past 32MB or 512 files.</li>
+  </ul>
+  <p class="muted">
+    The files land in <code>vendor/console/&lt;version&gt;/</code> rather than in a
+    database blob, so <code>git status</code> shows what an upload added and it can
+    be reviewed and reverted like any other change.
+  </p>
+</div>

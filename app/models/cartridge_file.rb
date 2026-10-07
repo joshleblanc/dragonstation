@@ -24,7 +24,26 @@ class CartridgeFile < ApplicationRecord
 
   scope :ordered, -> { order(:path) }
 
+  # What the file page can show without opening the bytes. Not a claim about
+  # what the file contains -- it is what the name lets us promise before
+  # downloading it, which is the only thing available when a page lists fifty
+  # of them.
+  #
+  # Grounded in what carts actually carry: source in .rb, and the data files
+  # DragonRuby loads -- .json for LDTK maps, .txt, .yml, .csv. Anything outside
+  # this is an asset, and an asset is not something to print.
+  TEXT_EXTENSIONS = %w[rb json txt md yml yaml lua csv].freeze
+
   def ruby? = path.end_with?(".rb")
-  def binary? = !ruby?
+  def text? = TEXT_EXTENSIONS.include?(extension)
+  def image? = Marcel::MimeType.for(name: path).to_s.start_with?("image/")
+
+  # Whether the file page has something to show: text to print, or an image to
+  # render. Everything else is a download.
+  def previewable? = text? || image?
+
   def filename = File.basename(path)
+
+  private
+    def extension = File.extname(path).delete_prefix(".").downcase
 end

@@ -1,0 +1,118 @@
+<% content_for :title, "Console #{@console_version.version}" %>
+
+<div class="admin-head">
+  <div>
+    <h1>
+      Console <%= @console_version.version %>
+      <% if @console_version.default? %><span class="state state-ok">default</span><% end %>
+    </h1>
+    <p class="lede">
+      <%= render "admin/console_versions/state", version: @console_version %>
+    </p>
+  </div>
+  <%= link_to "All versions", admin_console_versions_path, class: "secondary" %>
+</div>
+
+<% if !@console_version.available? %>
+  <div class="admin-caution">
+    <p><strong>This version has no directory under <code>vendor/console/</code>.</strong></p>
+    <p>Every cartridge pinned to <%= @console_version.version %> will fail to boot.
+      Restore the directory, or remove the row.</p>
+  </div>
+<% end %>
+
+<div class="admin-section">
+  <h2>Default</h2>
+  <p class="muted">
+    The default is what a new upload is pinned to. It does not move a cartridge
+    that already exists &mdash; those keep the version they were uploaded
+    against, which is the whole point of pinning them.
+  </p>
+  <div class="admin-actions">
+    <% if @console_version.default? %>
+      <%= button_to "Stop using this as the default",
+            default_admin_console_version_path(@console_version),
+            method: :patch, params: { state: "not_default" }, class: "secondary" %>
+    <% else %>
+      <%= button_to "Make this the default",
+            default_admin_console_version_path(@console_version),
+            method: :patch, params: { state: "default" } %>
+    <% end %>
+  </div>
+</div>
+
+<div class="admin-section">
+  <h2>Library</h2>
+  <table class="admin-table">
+    <tbody>
+      <tr><th>Directory</th><td><code><%= @console_version.library.directory.relative_path_from(Rails.root) %></code></td></tr>
+      <tr><th>Declared version</th><td><code><%= @declared.inspect %></code></td></tr>
+      <tr><th>Modules required</th><td><%= @modules.size %></td></tr>
+      <tr><th>Fonts</th><td><%= @fonts.empty? ? "none" : @fonts.join(", ") %></td></tr>
+      <tr><th>Installed</th><td><%= @console_version.created_at.to_fs(:long) %></td></tr>
+    </tbody>
+  </table>
+
+  <% if @modules.any? %>
+    <%# Require order is load-bearing -- the modules reference each other at call
+        time, not load time, but main.rb still has to load them in this order.
+        So it is shown in order rather than sorted. %>
+    <details class="files">
+      <summary>Require order (<%= @modules.size %> modules)</summary>
+      <table class="file-table">
+        <% @modules.each_with_index do |(path, size), index| %>
+          <tr>
+            <td class="num muted"><%= index + 1 %></td>
+            <td><code><%= path %></code></td>
+            <td class="num muted">
+              <%# nil means the file is named by main.rb but not on disk, which
+                  is the one state this table has to be able to show. %>
+              <%= size ? number_to_human_size(size) : "missing" %>
+            </td>
+          </tr>
+        <% end %>
+      </table>
+    </details>
+  <% end %>
+</div>
+
+<% if @console_version.notes.present? %>
+  <div class="admin-section">
+    <h2>Notes</h2>
+    <p class="muted"><%= @console_version.notes %></p>
+  </div>
+<% end %>
+
+<div class="admin-section">
+  <h2>Pinned cartridges (<%= @pinned.size %>)</h2>
+  <% if @pinned.any? %>
+    <table class="admin-table">
+      <thead>
+        <tr>
+          <th>Cartridge</th>
+          <th>Owner</th>
+          <th>State</th>
+          <th class="num">Uploaded</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% @pinned.each do |cartridge| %>
+          <tr>
+            <td><%= link_to cartridge.title, cartridge %></td>
+            <td class="muted"><%= cartridge.user.username %></td>
+            <td>
+              <% if cartridge.published? %>
+                <span class="state state-ok">published</span>
+              <% else %>
+                <span class="state">draft</span>
+              <% end %>
+            </td>
+            <td class="num muted"><%= cartridge.created_at.to_fs(:long) %></td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  <% else %>
+    <p class="muted">No cartridge is pinned to this version.</p>
+  <% end %>
+</div>

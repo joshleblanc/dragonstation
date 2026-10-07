@@ -46,16 +46,24 @@ class ConsoleLibrary
   # Takes a ConsoleVersion, or a bare version string for callers that are
   # inspecting a directory that has no row yet -- the install task is exactly
   # that case, since it has to decide whether to create the row.
-  def initialize(console_version)
+  #
+  # `directory:` points the reader at some other tree entirely, which is what
+  # lets an install validate an uploaded archive *before* it is moved into
+  # vendor/console. The rules below are then the same ones that will be checked
+  # once it lands, because it is this class doing both.
+  def initialize(console_version, directory: nil)
     @console_version =
       if console_version.is_a?(ConsoleVersion)
         console_version
       else
         ConsoleVersion.new(version: console_version.to_s)
       end
+    @directory = directory
   end
 
-  def directory = self.class.root.join(console_version.version)
+  # The version directory this library reads from: the one the caller named, or
+  # the canonical one under vendor/console.
+  def directory = @directory || self.class.root.join(console_version.version)
 
   def entry_path = directory.join(ENTRY_TEMPLATE)
 

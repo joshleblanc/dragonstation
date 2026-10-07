@@ -1,0 +1,65 @@
+<% content_for :title, @file.path %>
+
+<div class="page-head">
+  <h1><code><%= @file.path %></code></h1>
+  <p class="lede">
+    in <%= link_to @cartridge.title, cartridge_path(@cartridge) %>
+    &middot; <%= number_to_human_size(@file.byte_size) %>
+  </p>
+</div>
+
+<%# One frame, reused: the cart's page targets this id from every file link, so
+    reading a second file replaces the first rather than stacking another page
+    below it. The page this is embedded in keeps its wasm runtime either way --
+    the frame is a fetch and a DOM swap, not a visit. Opened on its own it is
+    still an ordinary page. %>
+<%= turbo_frame_tag "file_viewer" do %>
+  <div class="file-viewer-head">
+    <code><%= @file.path %></code>
+    <span class="muted"><%= number_to_human_size(@file.byte_size) %></span>
+
+    <%# Closing is another frame load rather than a visit: the target is the
+        cart's page, which carries this same frame empty. Navigation is kept out
+        of it on purpose -- see the note on the file list. %>
+    <%= link_to "Close", cartridge_path(@cartridge), class: "file-viewer-close",
+          data: { turbo_frame: "file_viewer" } %>
+  </div>
+
+  <% if @contents %>
+    <% markup, coloured = highlighted(@file, @contents) %>
+    <pre class="source"><%= markup %></pre>
+
+    <% unless coloured %>
+      <p class="muted">
+        Printed plain rather than coloured: past
+        <%= number_to_human_size(FileHighlighter::HIGHLIGHT_LIMIT) %> highlighting costs
+        more than it shows.
+        <%= link_to "Get the whole file", download_path(@file), data: { turbo_frame: "_top" } %>.
+      </p>
+    <% end %>
+
+    <% if @truncated %>
+      <p class="muted">
+        Showing the first <%= number_to_human_size(CartridgeFilesController::TEXT_LIMIT) %>
+        of <%= number_to_human_size(@file.byte_size) %>.
+        <%= link_to "Get the whole file", download_path(@file), data: { turbo_frame: "_top" } %>.
+      </p>
+    <% end %>
+  <% elsif @file.image? %>
+    <%# The same bytes the game loads, so what is drawn here is what it draws. %>
+    <p class="file-image">
+      <img src="<%= download_path(@file) %>" alt="<%= @file.filename %>">
+    </p>
+  <% elsif @file.text? %>
+    <p class="muted">
+      Named like text but not printable &mdash; either it is too large to read here,
+      or its bytes are not text.
+      <%= link_to "Download it", download_path(@file), data: { turbo_frame: "_top" } %>.
+    </p>
+  <% else %>
+    <p class="muted">
+      <%= @file.filename %> is an asset, not something to read.
+      <%= link_to "Download it", download_path(@file), data: { turbo_frame: "_top" } %>.
+    </p>
+  <% end %>
+<% end %>

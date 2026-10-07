@@ -1,0 +1,19 @@
+<%# One row's health, in the same three states bin/rails console:status prints.
+    Kept as a partial because the dashboard and the version index both need it,
+    and a version that reads "ok" in one place and "missing" in the other is
+    worse than no status at all. %>
+<%
+  declared =
+    begin
+      version.library.declared_version
+    rescue ConsoleLibrary::Missing
+      nil
+    end
+%>
+<% if !version.available? %>
+  <span class="state state-bad">missing directory</span>
+<% elsif declared.blank? || declared != version.version %>
+  <span class="state state-warn">mislabelled &mdash; says <%= declared.presence || "nothing" %></span>
+<% else %>
+  <span class="state state-ok">ok</span>
+<% end %>

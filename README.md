@@ -76,6 +76,83 @@ published comes from the bytes that will actually be returned, and there is a
 test that fetches every file over HTTP and compares it to the number the
 manifest declared.
 
+## Reading a cart's files
+
+The cart's page lists what is in the cart, and everything readable opens **in
+place** &mdash; under the list, with the game still running above it:
+
+```
+GET /cartridges/space/files?path=app/space.rb   the contents of one file, as a page
+```
+
+Every link targets one `turbo-frame#file_viewer`, so a file is a fetch and a DOM
+swap rather than a visit. That is the whole reason: this page is holding a wasm
+runtime in a `data-turbo-permanent` iframe, and a Turbo visit would tear it down
+and boot the game again to read one file. Opened directly it is an ordinary page,
+and without JavaScript every link is a plain page load &mdash; only the staying
+put is lost, not the reading.
+
+These are the same bytes `play/gamedata/<path>` already serves to the game and to
+anyone else &mdash; a published cart's source is not a secret &mdash; so this is
+not a new disclosure. It is the same file with a reader around it: Ruby and data
+files print, images render at their own size, and anything else is offered as a
+download instead of being guessed at.
+
+Two things decide what a page can show. The extension says what the file is
+*named*, which is all that is available while listing fifty of them; the bytes
+say what it *is*, using the same NUL-byte test `CartridgeIngest` uses to tell
+source from asset. A file named `.txt` holding binary is not printed as mojibake.
+Printing stops at 128KB and says so &mdash; silently stopping mid-file reads as
+the whole file &mdash; and a file over 4MB is not read at all.
+
+### Highlighting
+
+[Rouge](https://github.com/rouge-ruby/rouge) marks the source up server-side.
+That is not a preference: the file arrives inside a Turbo frame as HTML, so
+anything that coloured it in the browser would have to run again on every frame
+load and would not run at all with scripting off. Rouge emits classed spans and
+the colours live in `application.css` with everything else, so the reader is
+themed like the rest of the site.
+
+The lexer comes from the file's name and nothing else &mdash; guessing by
+content would mean reading the whole file to decide how to read it. A name Rouge
+does not know is plain text, which is a correct answer rather than a failure.
+
+Two consequences worth knowing:
+
+- **Colours stop at 64KB.** Rouge emits about five times the source in markup, so
+  at the reader's 128KB cap that is half a megabyte of HTML and a fifth of a
+  second of lexing per click. Past 64KB a file prints plain, and says that it
+  has. An LDTK map is exactly the kind of file that lands here.
+- **It is the only `html_safe` string on the site.** Rouge escapes every token it
+  emits and adds only its own spans, so the markup is safe to render as-is &mdash;
+  but a cart is a stranger's upload, so there is a test that feeds the reader a
+  file shaped like an attack and asserts it produces no tag.
+
+Which cartridge a path belongs to is decided by the database, never by joining
+the path onto a directory, so traversal has nothing to resolve against.
+Visibility is the same rule the runtime and the cart's page use, written once in
+[CartridgeVisibility](app/controllers/concerns/cartridge_visibility.rb).
+
+### Why the path is a query parameter
+
+Turbo refuses to navigate any URL whose last path segment ends in one of about
+sixty extensions &mdash; `.png`, `.json`, `.txt`, `.wav` and the rest &mdash;
+because those are usually downloads and the browser should handle them natively.
+A cart is mostly sprites and data files, so links shaped like files open nothing
+at all: they navigate away, which on this page means the game reloads. `.rb` is
+not on that list, so a source file appears to work and hides the bug. The path
+therefore rides in `?path=`, where no extension exists for Turbo to judge, and
+there is a test that fails if a link ever ends in one of those extensions again.
+
+It also retires an older trap. Rails decides the response format by matching
+`/\.(\w+)\z/` against the request path, so a URL ending in `.json` asks for a
+json template and answers 406 &mdash; a route cannot opt out, since `format: false`
+stops *routing* from splitting the filename but not that match. With the path
+out of the route there is nothing to match. The runtime route still has the
+problem, because the loader asks for its files by name, and rebuilds each path
+from `params[:path]` and `params[:format]` instead.
+
 ## Accounts
 
 Registration is open. A username is the public identity a cartridge is
@@ -104,27 +181,95 @@ bin/rails console:install VERSION=0.2.0 DEFAULT=true
 bin/rails console:status
 ```
 
+or upload a ZIP at `/admin/console_versions/new`.
+
 `console:install` reads the version out of the library's own
 `app/console/version.rb` and refuses a directory whose name disagrees with it.
-This is a rake task rather than an admin screen on purpose: installing a library
-means dropping a directory into the repository and running one command, which is
-reviewable and reversible. An endpoint that could replace the library every
-cartridge is pinned to would be a much worse way to do the same thing.
+The upload screen reads it from the same file and installs under it, so an
+archive cannot be installed under a label its own code disagrees with.
+
+Both paths run the same checks through `ConsoleLibraryInstall.inspect`, so a
+library cannot be accepted by the task and refused by the screen, or the
+reverse. The task is still the better route when the library is already in a
+checkout: an upload lands in `vendor/console/` as untracked files, where
+`git status` shows it and a commit records who added it.
+
+### Installing is not updating
+
+Neither path will replace an installed version, and the reason is specific
+rather than cautious. Pinning is what makes a leaderboard run comparable with
+the run beside it, and a cartridge's pin is the version *label* &mdash; the
+`console_versions` row. Overwriting `vendor/console/0.2.0/` would leave every
+label, every pin and every admin page looking exactly as they did while changing
+the code every cartridge on that version runs. Nothing would report a problem.
+The scores would simply stop meaning anything.
+
+So an upload naming an installed version is refused by name, and the way to ship
+a change is to bump `MAJOR.MINOR.PATCH` in `app/console/version.rb` and upload it
+again as a new version. `console:install` stays idempotent &mdash; re-running it
+on a checkout registers what is already there &mdash; but it registers, and never
+rewrites files in place.
+
+### What the upload is allowed to add
+
+The one thing worth spelling out is `app/main.rb`. `ConsoleLibrary` reads the
+require list out of that file and serves exactly those modules to every
+cartridge on the version, and `CartridgeRuntimeController` picks the content
+type from the extension. A `require 'app/console/payload.html'` would therefore
+be served as `text/html` from this origin, to anyone loading a game.
+
+Both install paths refuse a require that is not a `.rb` module directly under
+`app/console/`, and refuse a require of anything at all that is missing or lives
+outside that directory. The second one is not only a security check:
+`ConsoleLibrary::REQUIRE_PATTERN` only matches `app/console/`, so a require of
+`app/secrets.rb` would otherwise be *silently ignored* &mdash; installed as though
+it were fine, then missing from every cartridge's served tree.
+
+### One guard, two upload paths
+
+`SafeArchive` holds the traversal, symlink and expansion-bomb refusals shared by
+the cartridge upload and the library upload. A traversal guard written twice is
+a traversal guard that will eventually exist once.
 
 ## Layout
 
 ```
 app/services/console_library.rb     one vendored library version, as served
+app/services/console_library_install.rb  a new version, from an archive or a directory
+app/services/concerns/safe_archive.rb    the ZIP refusals both upload paths share
 app/services/cartridge_stager.rb    the served tree + the manifest
 app/services/cartridge_ingest.rb    ZIP -> cartridge, or the reason why not
 app/services/console_metadata.rb    the metadata and icon at the game root
 app/services/html5_build.rb         the build, with its loader header rewritten
 app/controllers/cartridge_runtime_controller.rb   manifest + gamedata + shell
+app/controllers/admin/base_controller.rb          the admin gate: a 404, not a redirect
+app/controllers/admin/console_versions_controller.rb   versions, and installing one
 app/controllers/concerns/cross_origin_isolation.rb  COOP/COEP for the wasm build
 public/dragonruby/                  the DragonRuby HTML5 wasm build
 vendor/console/<version>/           vendored console libraries
 lib/tasks/console.rake              console:install, console:status
 ```
+
+## Admin
+
+The first account to register is the operator, and `/admin` is the only place
+that fact is used. `Admin::BaseController` answers a signed-in non-admin with a
+404 rather than a redirect, because an admin URL that answers differently for a
+stranger is an admin URL that can be written down &mdash; and its existing
+existence is the only part that matters to whoever finds it. Anonymous visitors
+are redirected to sign in, since `require_authentication` runs first.
+
+Two screens so far:
+
+| Path | What it is |
+|---|---|
+| `/admin` | counts, and the two states nothing else reports: a version with no directory, a version with none installed at all |
+| `/admin/console_versions` | `console:status` as a page &mdash; per version, its state, module count, and the cartridges pinned to it |
+| `/admin/console_versions/new` | upload a library as a version that does not exist yet |
+
+Setting the default is a deliberate, separate act rather than a side effect of
+uploading. It decides what a *new* cartridge is pinned to and cannot move one
+that already exists.
 
 ## SharedArrayBuffer and cross-origin isolation
 
