@@ -1,0 +1,49 @@
+<% content_for :title, "Dragonstation" %>
+
+<div class="page-head">
+  <h1>Cartridges</h1>
+  <p class="lede">
+    Games built with the <a href="https://github.com/dragonruby/dragonruby">DragonRuby</a>
+    cartridge console, running in your browser.
+  </p>
+</div>
+
+<% if @cartridges.empty? %>
+  <div class="empty">
+    <p>No cartridges published yet.</p>
+    <% if authenticated? %>
+      <p><%= link_to "Upload the first one", new_cartridge_path %> &mdash; zip your cart directory and drop it in.</p>
+    <% else %>
+      <p><%= link_to "Sign in", new_session_path %> to upload one.</p>
+    <% end %>
+  </div>
+<% else %>
+  <ul class="cart-grid">
+    <% @cartridges.each do |cartridge| %>
+      <li class="cart-card">
+        <%= link_to cartridge_path(cartridge), class: "cart-card-link" do %>
+          <div class="cart-card-body">
+            <h2><%= cartridge.title %></h2>
+            <p class="cart-card-meta">
+              by <%= cartridge.user.username %>
+              &middot; console <%= cartridge.console_version.version %>
+              &middot; <%= cartridge.cartridge_files.size %> files
+            </p>
+            <% if cartridge.description.present? %>
+              <p class="cart-card-desc"><%= truncate(cartridge.description, length: 120) %></p>
+            <% end %>
+          </div>
+        <% end %>
+      </li>
+    <% end %>
+  </ul>
+<% end %>
+
+<% if authenticated? && (Current.user.admin? || @cartridges.any?) %>
+  <p class="console-note">
+    Running console <strong><%= @console_versions.first&.version || "none installed" %></strong>.
+    <% unless @console_versions.first&.available? %>
+      <span class="warn">No library is installed &mdash; run <code>bin/rails console:install</code>.</span>
+    <% end %>
+  </p>
+<% end %>

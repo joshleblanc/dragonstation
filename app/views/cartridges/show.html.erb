@@ -1,0 +1,69 @@
+<% content_for :title, @cartridge.title %>
+
+<% unless @cartridge.published? %>
+  <p class="draft-banner">
+    Draft &mdash; only you and admins can see this cartridge.
+  </p>
+<% end %>
+
+<div class="play-head">
+  <div>
+    <h1><%= @cartridge.title %></h1>
+    <p class="lede">
+      by <%= @cartridge.user.username %>
+      &middot; console <%= @cartridge.console_version.version %>
+      &middot; entry <code><%= @cartridge.entry_path %></code>
+    </p>
+    <% if @cartridge.description.present? %>
+      <p class="play-desc"><%= @cartridge.description %></p>
+    <% end %>
+  </div>
+
+  <% if @owned %>
+    <div class="play-actions">
+      <% if @cartridge.published? %>
+        <%= button_to "Unpublish", publish_cartridge_path(@cartridge), method: :patch,
+              params: { state: "draft" }, class: "secondary" %>
+      <% else %>
+        <%= button_to "Publish", publish_cartridge_path(@cartridge), method: :patch,
+              params: { state: "published" } %>
+      <% end %>
+    </div>
+  <% end %>
+</div>
+
+<%# data-turbo-permanent: the iframe owns a whole wasm runtime. Turbo driving a
+    visit to another cartridge should not tear that down and rebuild it, and
+    the loader caches game files in IndexedDB keyed by manifest filetime. %>
+<div class="cart-embed" data-turbo-permanent id="cartridge-embed">
+  <iframe
+    class="cart-embed-frame"
+    frameborder="0"
+    title="<%= @cartridge.title %>"
+    src="<%= cartridge_shell_path(@cartridge.slug, "index.html") %>"
+    allow="autoplay; gamepad"
+  ></iframe>
+</div>
+
+<p class="embed-note">
+  The canvas starts on click &mdash; browsers require a gesture before a game
+  can make sound. Keyboard, gamepad and mouse all work.
+</p>
+
+<details class="files">
+  <summary><%= pluralize(@cartridge.cartridge_files.size, "file") %> in this cart</summary>
+  <table class="file-table">
+    <tbody>
+      <% @cartridge.cartridge_files.ordered.each do |file| %>
+        <tr>
+          <td><code><%= file.path %></code></td>
+          <td class="num"><%= number_to_human_size(file.byte_size) %></td>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+  <p class="muted">
+    Plus the console <%= @cartridge.console_version.version %> library
+    (<%= @cartridge.console_version.library.require_paths.size %> modules) and both fonts, served on every run.
+  </p>
+</details>

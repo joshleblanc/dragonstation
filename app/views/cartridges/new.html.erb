@@ -1,0 +1,52 @@
+<% content_for :title, "Upload a cartridge" %>
+
+<div class="page-head">
+  <h1>Upload a cartridge</h1>
+  <p class="lede">
+    Zip your cart directory and drop it in. The cart directory is the one with
+    <code>app/main.rb</code> (or <code>app/&lt;cart name&gt;.rb</code>) in it.
+  </p>
+</div>
+
+<%= form_with model: @cartridge, url: cartridges_path, class: "upload-form" do |f| %>
+  <div class="field">
+    <%= f.label :archive, "Cartridge (.zip)" %>
+    <%= f.file_field :archive, accept: ".zip,application/zip", required: true %>
+    <p class="muted">
+      Zip the folder, not its contents&rsquo; parent &mdash; the archive should
+      contain one directory that has an <code>app/</code> in it.
+    </p>
+  </div>
+
+  <div class="field">
+    <%= f.label :title, "Title" %>
+    <%= f.text_field :title, placeholder: "left blank, the cart's TITLE is used" %>
+  </div>
+
+  <div class="field">
+    <%= f.label :console_version_id, "Console version" %>
+    <%= f.collection_select :console_version_id, @console_versions.select(&:available?), :id, :version,
+          { selected: @console_version&.id },
+          { disabled: @console_versions.select(&:available?).none? } %>
+    <p class="muted">
+      This cart is pinned to the version chosen here. Updating the library
+      later will not change how this game runs.
+    </p>
+  </div>
+
+  <%# The upload is a multipart POST of arbitrary bytes into ActiveStorage.
+      Turbo Drive submits forms through fetch, which is fine, but a failed
+      ingest re-renders with the problems and the file input cannot be
+      repopulated -- so the error is shown as a pre-formatted block above. %>
+  <%= f.submit "Upload" %>
+<% end %>
+
+<div class="upload-help">
+  <h2>What gets checked</h2>
+  <ul>
+    <li>The archive holds <strong>exactly one</strong> cart. Two is an error, not a choice.</li>
+    <li>It has an entry file, and its name is a usable Ruby constant &mdash; the console looks your cart's class up by directory name.</li>
+    <li>Every <code>sprites/</code>, <code>sounds/</code>, <code>maps/</code> and <code>data/</code> path your source names is inside your own cart. Nothing is borrowed from console-root starter art, because nothing here has any.</li>
+    <li>No absolute paths, no <code>..</code> segments, no symlinks, and the archive cannot expand past 32MB or 512 files.</li>
+  </ul>
+</div>

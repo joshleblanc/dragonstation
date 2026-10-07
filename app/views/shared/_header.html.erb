@@ -1,0 +1,17 @@
+<header class="site-header">
+  <a class="brand" href="<%= root_path %>">Dragonstation</a>
+
+  <nav class="site-nav">
+    <% if authenticated? %>
+      <%= link_to "Upload a cart", new_cartridge_path %>
+      <span class="who">
+        <%= Current.user.username %>
+        <% if Current.user.admin? %><span class="badge">admin</span><% end %>
+      </span>
+      <%= button_to "Sign out", session_path, method: :delete, class: "link-button" %>
+    <% else %>
+      <%= link_to "Sign in", new_session_path %>
+      <%= link_to "Create account", new_registration_path %>
+    <% end %>
+  </nav>
+</header>
