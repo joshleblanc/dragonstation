@@ -44,8 +44,9 @@
     <% if @versions.empty? %>
       <tr>
         <td colspan="5" class="muted">
-          Nothing installed. Put a library under <code>vendor/console/&lt;version&gt;/</code>
-          and run <code>bin/rails console:install</code>, or upload a ZIP.
+          Nothing installed. Upload a ZIP, or run
+          <code>bin/rails console:install PATH=/path/to/console</code> to install
+          a checkout.
         </td>
       </tr>
     <% end %>

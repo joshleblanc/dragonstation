@@ -53,6 +53,22 @@ class Admin::DashboardControllerTest < ActionDispatch::IntegrationTest
     assert_select ".admin-caution", text: /No console library is installed/
   end
 
+  # Both cautions used to point an operator at a `vendor/console/` directory,
+  # which is where the library used to live and no longer is -- so the
+  # instruction named a path nothing reads. The failure is silent: an operator
+  # following the old text creates a directory the app never looks at.
+  test "neither caution names a directory to put a library in" do
+    sign_in_as @admin
+    get admin_root_path
+
+    assert_no_match %r{vendor/console}, response.body
+
+    ConsoleVersion.create!(version: "0.0.1")
+    get admin_root_path
+
+    assert_no_match %r{vendor/console}, response.body
+  end
+
   test "it warns when a version has no library files" do
     # The upload form rejects its own submission when there is no library, so
     # this is the page that has to surface it.

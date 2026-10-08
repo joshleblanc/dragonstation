@@ -147,6 +147,34 @@ class ConsoleLibraryInstall
     [ declared, problems ]
   end
 
+  # Store the library: the row first, then one blob per file beneath it.
+  #
+  # Public because it is the one step both install paths share -- `call` for an
+  # archive, `install!` for a checkout -- and each reaches it with an explicit
+  # receiver. It is also the whole reason those two paths cannot disagree.
+  #
+  # The row goes first because the files belong to it. If a blob fails to
+  # attach the transaction rolls the row back and nothing is left behind --
+  # the reverse order would leave an unusable version selectable.
+  def publish(entries, version)
+    ConsoleVersion.transaction do
+      console_version = ConsoleVersion.create!(
+        version: version,
+        title: title.presence || "Console #{version}",
+        notes: notes.presence || "Installed from an uploaded ZIP."
+      )
+
+      # Created rather than built on a relation: each file is attached with
+      # its own blob, so this is one INSERT and one blob write per file.
+      entries.sort.each do |path, bytes|
+        file = console_version.console_library_files.create!(path: path, byte_size: bytes.bytesize)
+        file.blob.attach(io: StringIO.new(bytes), filename: File.basename(path))
+      end
+
+      console_version
+    end
+  end
+
   private
     def archive_subject = "console library"
 
@@ -249,36 +277,11 @@ class ConsoleLibraryInstall
   # adopt under a label nobody chose. Storage has no such state: the files hang
   # off the row, so a version with files but no row is not reachable, and a row
   # with no files is simply a broken install rather than a separate hazard.
-  private
-    def occupancy_problems(version)
-      return [] unless ConsoleVersion.exists?(version: version)
+  def occupancy_problems(version)
+    return [] unless ConsoleVersion.exists?(version: version)
 
-      [ "console #{version} is already installed. Cartridges are pinned to the version they " \
-        "were uploaded against and are never moved, so an installed version is never " \
-        "replaced. Bump MAJOR/MINOR/PATCH in app/console/version.rb and upload again." ]
-    end
-
-  # Store the library: the row first, then one blob per file beneath it.
-  #
-  # The row goes first because the files belong to it. If a blob fails to
-  # attach the transaction rolls the row back and nothing is left behind --
-  # the reverse order would leave an unusable version selectable.
-  def publish(entries, version)
-      ConsoleVersion.transaction do
-        console_version = ConsoleVersion.create!(
-          version: version,
-          title: title.presence || "Console #{version}",
-          notes: notes.presence || "Installed from an uploaded ZIP."
-        )
-
-        # Created rather than built on a relation: each file is attached with
-        # its own blob, so this is one INSERT and one blob write per file.
-        entries.sort.each do |path, bytes|
-          file = console_version.console_library_files.create!(path: path, byte_size: bytes.bytesize)
-          file.blob.attach(io: StringIO.new(bytes), filename: File.basename(path))
-        end
-
-        console_version
-      end
-    end
+    [ "console #{version} is already installed. Cartridges are pinned to the version they " \
+      "were uploaded against and are never moved, so an installed version is never " \
+      "replaced. Bump MAJOR/MINOR/PATCH in app/console/version.rb and upload again." ]
+  end
 end

@@ -78,7 +78,7 @@ class ConsoleLibraryInstallTest < ActiveSupport::TestCase
 
     # The installed copy is untouched. This is the whole point: a cartridge
     # pinned to 0.2.0 must keep running the bytes it was pinned to.
-    assert_equal "module Console; end\n", installed_library.read("app/console/core.rb")
+    assert_equal "module Console; end\n", installed_library.library.read("app/console/core.rb")
   end
 
   test "refuses when the version has a row but no files" do
@@ -93,13 +93,21 @@ class ConsoleLibraryInstallTest < ActiveSupport::TestCase
 
   # The storage case that used to need its own test: a directory that existed
   # with no row. It cannot be produced here -- files hang off the row, so there
-  # is no directory to exist without one. Pinning the rule that replaced it:
+  # is no directory to exist without one. Pinning the rule that replaced it: with
+  # nothing installed, an install of 0.2.0 is not blocked by anything, because
+  # there is nothing outside the database that could occupy a version. The row
+  # and the files appear together, in one transaction.
   test "there is no way to occupy a version without a row" do
-    assert_no_difference -> { ConsoleVersion.count } do
-      assert_rejected console_library_archive("0.2.0")
+    assert_difference -> { ConsoleVersion.count }, 1 do
+      assert_difference -> { ConsoleLibraryFile.count }, 3 do
+        version = ConsoleLibraryInstall.new(archive: console_library_archive("0.2.0")).call
+
+        assert_equal "0.2.0", version.version
+      end
     end
-    assert_empty ConsoleVersion.all
-    assert_empty ConsoleLibraryFile.all
+
+    assert_equal %w[app/console/core.rb app/console/version.rb app/main.rb],
+      ConsoleLibraryFile.ordered.pluck(:path)
   end
 
   test "installs a new version alongside one that is already in use" do
@@ -267,7 +275,7 @@ class ConsoleLibraryInstallTest < ActiveSupport::TestCase
         File.binwrite(full, bytes)
       end
 
-      @checkouts << dir
+      checkouts << dir
       dir
     end
 

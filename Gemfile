@@ -40,6 +40,15 @@ gem "thruster", require: false
 # Use Active Storage variants [https://guides.rubyonrails.org/active_storage_overview.html#transforming-images]
 gem "image_processing", "~> 1.2"
 
+# The `amazon` service in config/storage.yml. Active Storage ships the S3
+# service class but not the SDK behind it, so without this gem the service is a
+# line of YAML that raises on boot the moment anything selects it -- and
+# config/storage.yml would name a service this app cannot actually use.
+#
+# It is S3 by protocol as well as by name, so this one gem covers R2, MinIO and
+# the rest of the S3-compatible stores too; they differ only in `endpoint`.
+gem "aws-sdk-s3", require: false
+
 # Uploaded cartridges arrive as ZIPs and this app reads them directly, rather
 # than only through ActiveStorage's archive analysis. It is already installed as
 # a dependency of activestorage, but a direct dependency should be declared

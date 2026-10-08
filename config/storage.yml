@@ -6,13 +6,30 @@ local:
   service: Disk
   root: <%= Rails.root.join("storage") %>
 
-# Use bin/rails credentials:edit to set the AWS secrets (as aws:access_key_id|secret_access_key)
-# amazon:
-#   service: S3
-#   access_key_id: <%= Rails.application.credentials.dig(:aws, :access_key_id) %>
-#   secret_access_key: <%= Rails.application.credentials.dig(:aws, :secret_access_key) %>
-#   region: us-east-1
-#   bucket: your_own_bucket-<%= Rails.env %>
+# The remote service. Everything the site stores -- console library files and
+# cartridge files alike -- goes here when ACTIVE_STORAGE_SERVICE is "amazon".
+#
+# Read from the environment rather than credentials, so the bucket secrets stay
+# out of the image and out of git; Kamal injects them from config/deploy.yml.
+# They are deliberately written with ENV[] and not ENV.fetch, because a service
+# that is not the one in use should not have to be configured at all.
+#
+# This is S3 by name and S3 by protocol, which means it is also the config for
+# anything that speaks S3: set endpoint to your provider's URL and leave
+# force_path_style on for MinIO and the like. AWS itself ignores `endpoint`.
+amazon:
+  service: S3
+  access_key_id: <%= ENV["AWS_ACCESS_KEY_ID"] %>
+  secret_access_key: <%= ENV["AWS_SECRET_ACCESS_KEY"] %>
+  region: <%= ENV["AWS_REGION"] || "us-east-1" %>
+  bucket: <%= ENV["AWS_BUCKET"] %>
+  # Set for an S3-compatible store on a custom host. Rails defaults this to
+  # true, which is wrong for AWS: virtual-host style addressing fails there.
+  endpoint: <%= ENV["AWS_ENDPOINT"] %>
+  # Cast rather than interpolated raw, because ENV is always a String and every
+  # String is truthy: AWS_FORCE_PATH_STYLE=false read raw would mean true, and
+  # would force path-style addressing onto a bucket that cannot use it.
+  force_path_style: <%= ActiveModel::Type::Boolean.new.cast(ENV.fetch("AWS_FORCE_PATH_STYLE", "false")) %>
 
 # Remember not to checkin your GCS keyfile to a repository
 # google:

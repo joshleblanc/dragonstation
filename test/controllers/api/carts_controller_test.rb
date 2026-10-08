@@ -118,7 +118,9 @@ class Api::CartsControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "publishing is refused when no library is installed" do
-    ConsoleVersion.delete_all
+    # destroy_all, not delete_all: a version's files hang off the row now, so
+    # deleting the rows outright leaves the files behind and trips the foreign key.
+    ConsoleVersion.destroy_all
 
     post_carts(space_cart)
 

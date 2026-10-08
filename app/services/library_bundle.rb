@@ -75,7 +75,7 @@ class LibraryBundle
   # Every file in the release, relative and forward-slashed.
   #
   # `release_tool:` adds the script only an administrator can use, and only if
-  # the vendored console actually has it -- an older vendored tree does not, and
+  # the stored library actually has it -- an older release does not, and
   # a download that promised a file it could not read would be worse than one
   # without it.
   #
@@ -85,7 +85,7 @@ class LibraryBundle
   def release_paths(release_tool: false)
     paths = @release_paths ||= base_release_paths
 
-    # Only the ones this vendored tree actually has: an older copy without the
+    # Only the ones this library actually has: an older release without the
     # batch file should still be given a working shell script.
     tool = RELEASE_SCRIPTS.select { |path| library.file?(path) }
     return paths if !release_tool || tool.empty?

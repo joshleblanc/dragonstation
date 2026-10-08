@@ -15,9 +15,11 @@
 
 <% if !@console_version.available? %>
   <div class="admin-caution">
-    <p><strong>This version has no directory under <code>vendor/console/</code>.</strong></p>
+    <p><strong>This version has no stored library files.</strong></p>
     <p>Every cartridge pinned to <%= @console_version.version %> will fail to boot.
-      Restore the directory, or remove the row.</p>
+      Its files were removed, or the row was created without an install. A version
+      is never written in place, so the fix is to install the release again under a
+      bumped version.</p>
   </div>
 <% end %>
 

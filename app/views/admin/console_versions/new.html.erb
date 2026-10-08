@@ -62,13 +62,14 @@
     <li><code>app/main.rb</code> exists and requires at least one module under <code>app/console/</code>.</li>
     <li>Every module it requires is <strong>present in the archive</strong>. A missing one is a cartridge that boots and then fails.</li>
     <li>Every required path is a <code>.rb</code> module directly under <code>app/console/</code>. That require list is exactly what gets served to the browser for every cartridge on this version, so it cannot be used to add markup.</li>
-    <li><code>app/console/version.rb</code> yields a MAJOR.MINOR.PATCH string, and that string names the directory &mdash; an archive cannot be installed under a label it disagrees with.</li>
+    <li><code>app/console/version.rb</code> yields a MAJOR.MINOR.PATCH string, and that string names the version &mdash; an archive cannot be installed under a label it disagrees with.</li>
     <li>That version is not already installed, and no cartridge is pinned to it.</li>
     <li>No absolute paths, no <code>..</code> segments, no symlinks, and the archive cannot expand past 32MB or 512 files.</li>
   </ul>
   <p class="muted">
-    The files land in <code>vendor/console/&lt;version&gt;/</code> rather than in a
-    database blob, so <code>git status</code> shows what an upload added and it can
-    be reviewed and reverted like any other change.
+    The files are stored against the version row as Active Storage blobs, one per
+    file, so <code>git status</code> stays clean and an upload is not a change to
+    review. To change an installed version, bump MAJOR.MINOR.PATCH in
+    <code>app/console/version.rb</code> and upload again.
   </p>
 </div>

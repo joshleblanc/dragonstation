@@ -62,11 +62,28 @@ namespace :console do
       puts "console: #{declared} is already installed (#{installed.console_library_files.count} files)"
       puts "console: NOT rewritten. To change #{declared}, bump MAJOR/MINOR/PATCH in " \
            "app/console/version.rb and install that instead."
-      abort "console: this build serves #{installed.library.declared_version}, not #{declared}" unless force
+
+      # The one thing worth stopping for: the row's label and the bytes behind it
+      # disagreeing. Every cartridge pinned to the label would then run code that
+      # says it is something else. The files hang off the row, so this is a
+      # broken install rather than a normal state -- but it is exactly the drift
+      # pinning cannot catch, because pinning is what preserved it.
+      #
+      # This compares the row's *label* against what the stored library declares.
+      # Comparing the checkout's declared version against the installed library's
+      # would compare a number with itself and fire on every run, which is what
+      # used to happen: the task aborted on its own idempotent re-run, and so
+      # could never be the deploy step it is documented to be.
+      unless installed.library.label_matches_contents? || force
+        abort "console: #{declared} is labelled #{installed.version} but its stored files " \
+              "declare #{installed.library.declared_version}. The row and the library " \
+              "disagree, and every cartridge pinned to #{installed.version} runs them. " \
+              "Re-run with FORCE=true to adopt the row as it is."
+      end
 
       installed
     else
-      console_version = ConsoleLibraryInstall.new(archive: nil, title: "Console #{declared}").install!(directory)
+      console_version = ConsoleLibraryInstall.install!(directory, title: "Console #{declared}")
 
       ConsoleVersion.where(default: true).where.not(id: console_version.id).update_all(default: false) if make_default
       console_version.update!(default: true) if make_default

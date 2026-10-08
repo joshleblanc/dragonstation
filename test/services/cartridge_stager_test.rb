@@ -128,31 +128,30 @@ class CartridgeStagerTest < ActiveSupport::TestCase
   test "a cartridge keeps serving the library version it was pinned to" do
     # The whole reason a cartridge has a console_version_id: installing a new
     # library must not change what an already-published game runs.
-    Dir.mktmpdir do |root|
-      write_library(root, "0.1.0", "OLD LIBRARY")
-      write_library(root, "0.9.0", "NEW LIBRARY")
+    #
+    # This used to write two libraries into a scratch directory and swap the app's
+    # library root to it. There is no root to swap now -- a version's files are
+    # blobs on its row -- so both libraries are installed the way the upload
+    # screen installs them, and the pin is asserted on the bytes each one serves.
+    # Versions that are not the real console's, because setup has already
+    # installed it and an install of an installed version is refused by name.
+    old = install_marker_library("8.1.0", "OLD LIBRARY", default: true)
+    pinned = ingest(space_cart, user: users(:one), console_version: old)
 
-      with_library_root(root) do
-        old = console_version!
-        old.update!(default: true)
-        pinned = ingest(space_cart, user: users(:one), console_version: old)
+    # A new library arrives and becomes the default for new uploads.
+    fresh = install_marker_library("8.9.0", "NEW LIBRARY", default: true)
+    assert_equal fresh, ConsoleVersion.default
 
-        # A new library arrives and becomes the default for new uploads.
-        fresh = ConsoleVersion.create!(version: "0.9.0", default: true)
-        assert_equal fresh, ConsoleVersion.default
+    # The old cartridge does not move.
+    pinned.reload
+    assert_equal old, pinned.console_version
+    assert_includes pinned.manifest.keys, "app/console/marker.rb"
+    assert_includes served_bytes(pinned, "app/console/marker.rb"), "OLD LIBRARY"
 
-        # The old cartridge does not move.
-        pinned.reload
-        assert_equal old, pinned.console_version
-        assert_includes pinned.manifest.keys, "app/console/marker.rb"
-        assert_includes served_bytes(pinned, "app/console/marker.rb"), "OLD LIBRARY"
-
-        # And a cartridge uploaded now does move.
-        newcomer = ingest(space_cart, user: users(:two))
-        assert_equal fresh, newcomer.console_version
-        assert_includes served_bytes(newcomer, "app/console/marker.rb"), "NEW LIBRARY"
-      end
-    end
+    # And a cartridge uploaded now does move.
+    newcomer = ingest(space_cart, user: users(:two))
+    assert_equal fresh, newcomer.console_version
+    assert_includes served_bytes(newcomer, "app/console/marker.rb"), "NEW LIBRARY"
   end
 
   test "a console version whose directory is missing fails loudly rather than silently" do
@@ -168,32 +167,37 @@ class CartridgeStagerTest < ActiveSupport::TestCase
   end
 
   private
-    def write_library(root, version, marker)
-      dir = File.join(root, version, "app", "console")
-      FileUtils.mkdir_p(dir)
-      # A library carries metadata and an icon too: the build reads
-      # /metadata/icon.png to draw the click-to-play overlay, so a fixture
-      # without them is not a library anything can actually run.
-      FileUtils.mkdir_p(File.join(root, version, "metadata"))
+    # Install a library carrying a marker file whose contents name it, so a test
+    # can tell *which* library's bytes a cartridge is being served.
+    #
+    # Carries metadata and an icon too: the build reads /metadata/icon.png to
+    # draw the click-to-play overlay, so a library without them is not one
+    # anything can actually run. Installed through ConsoleLibraryInstall rather
+    # than built by hand, so it is subject to the same validation as an upload.
+    def install_marker_library(version, marker, default: false)
+      major, minor, patch = version.split(".")
 
-      File.write(File.join(root, version, "app", "main.rb"),
-        "require 'app/console/version.rb'\nrequire 'app/console/marker.rb'\n")
-      File.write(File.join(dir, "version.rb"),
-        "module Console\n  module Version\n    MAJOR = #{version.split('.').join("\n    ")}\n  end\nend\n")
-      File.write(File.join(dir, "marker.rb"), "# #{marker}\n")
-      File.write(File.join(root, version, "metadata", "game_metadata.txt"), <<~TXT)
-        devid=dragonruby
-        devtitle=Console
-        gameid=console
-        gametitle=Console
-        version=1.0
-        icon=metadata/icon.png
-        highdpi=false
-      TXT
-      File.binwrite(File.join(root, version, "metadata", "icon.png"), "\x89PNG\r\n\x1A\n #{marker}")
+      version_row = install_console_library(version, {
+        "app/main.rb" => "require 'app/console/version.rb'\nrequire 'app/console/marker.rb'\n",
+        "app/console/marker.rb" => "# #{marker}\n",
+        ConsoleMetadata::PATH => metadata_file,
+        ConsoleMetadata::ICON_PATH => "\x89PNG\r\n\x1A\n #{marker}"
+      })
+
+      version_row.update!(default: true) if default
+      version_row
     end
 
-  # ConsoleLibraryTestHelper#with_library_root does the swap, including
-  # clearing ConsoleVersion's memoized library so a row loaded before the
-  # swap cannot keep reading the real vendor directory.
+    # The six keys ConsoleMetadata reads positionally. Rewriting a fresh
+    # six-line file instead of starting from a real one is exactly the mistake
+    # its own comment warns about.
+    def metadata_file = <<~META
+      devid=dragonruby
+      devtitle=Console
+      gameid=console
+      gametitle=Console
+      version=1.0
+      icon=metadata/icon.png
+      highdpi=false
+    META
 end

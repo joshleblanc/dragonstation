@@ -21,8 +21,20 @@ Rails.application.configure do
   # Enable serving of images, stylesheets, and JavaScripts from an asset server.
   # config.asset_host = "http://assets.example.com"
 
-  # Store uploaded files on the local file system (see config/storage.yml for options).
-  config.active_storage.service = :local
+  # Where uploaded files live (see config/storage.yml for the services).
+  #
+  # Read from the environment rather than pinned, because the choice of service
+  # is a deployment fact rather than a code fact: local disk is fine on one box
+  # but its contents do not survive a replacement, and every console library
+  # file -- and every cartridge file -- is in here. Point ACTIVE_STORAGE_SERVICE
+  # at "amazon" in Kamal to put them in a bucket instead.
+  #
+  # The default stays :local so a deployment that has not chosen yet still boots.
+  # Note that switching this does NOT move anything already uploaded: a blob
+  # records the service it was written to. Run `bin/rails active_storage:copy_blobs`
+  # before or after the switch, or the old blobs keep resolving to the local disk
+  # that is about to stop existing.
+  config.active_storage.service = ENV.fetch("ACTIVE_STORAGE_SERVICE", "local").to_sym
 
   # Assume all access to the app is happening through a SSL-terminating reverse proxy.
   # config.assume_ssl = true

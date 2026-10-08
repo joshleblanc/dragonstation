@@ -177,7 +177,9 @@ class DocsControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "there are no pages to show when no library is installed" do
-    ConsoleVersion.delete_all
+    # destroy_all, not delete_all: a version's files hang off the row now, so
+    # deleting the rows outright leaves the files behind and trips the foreign key.
+    ConsoleVersion.destroy_all
 
     get docs_path
     assert_response :not_found

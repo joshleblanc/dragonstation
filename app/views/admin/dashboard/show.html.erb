@@ -33,16 +33,16 @@
   <div class="admin-caution">
     <p><strong>No console library is installed.</strong></p>
     <p>Uploads will be refused until one is &mdash; a cartridge has nothing to build
-      against. Add one under <code>vendor/console/</code> and run
-      <code>bin/rails console:install</code>, or upload a ZIP.</p>
+      against. Upload a ZIP, or run
+      <code>bin/rails console:install PATH=/path/to/console</code>.</p>
   </div>
 <% elsif @unusable.any? %>
   <div class="admin-caution">
     <p><strong><%= pluralize(@unusable.size, "version") %> cannot be served.</strong></p>
     <p>
       <%= @unusable.map(&:version).to_sentence %>
-      <%= "has" %> a missing directory under <code>vendor/console/</code>. Every
-      cartridge pinned to <%= "it" %> will fail to boot. See
+      <%= "has" %> no stored library files. Every cartridge pinned to
+      <%= "it" %> will fail to boot. See
       <%= link_to "the console library", admin_console_versions_path %>.
     </p>
   </div>

@@ -96,19 +96,33 @@ The key is the opposite: it belongs to one account.
 **The download is a console, not a library.** The first version of it shipped
 only what a browser needs to run a cart, which left whoever unpacked it with a
 directory of Ruby and nothing to run it with. `LibraryBundle` now serves the
-whole release vendored under `vendor/console/<version>/`: the entry point, every
-script under `bin/` (shell and `.bat`), the starter art, the metadata, the
-README, and a `carts/` directory with a README in it. Unpacking it over a
-checkout gives you a console that boots.
+whole release: the entry point, every script under `bin/` (shell and `.bat`), the
+starter art, the metadata, the README, and a `carts/` directory with a README in
+it. Unpacking it over a checkout gives you a console that boots.
 
 Two details that took a test to find: the ZIP carries **Unix modes**, because a
 console whose scripts arrive non-executable is a console that cannot be run --
 and `errors/last.txt`, `builds/` and one reader's `dragonstation.json` are
 excluded, because they are that machine's state rather than the console's.
 
-That vendored tree is a copy of `~/dev/dragonruby/console`, and keeping it
-honest is manual: when the console moves, so does this copy. `vendor/console/`
-is deliberately not wired into autoloading -- it is data, served, not code.
+**The release is stored as blobs, not as a directory.** It used to be vendored
+under `vendor/console/<version>/`, kept honest by hand: when the console moved,
+so did the copy, and nothing but discipline connected the tree to the version
+row. It is now one `ConsoleLibraryFile` row per file, each holding an Active
+Storage blob, hanging off the `console_versions` row through `has_many`. Three
+things follow, and they are the reason it moved:
+
+* a version's files cannot be edited in place, because editing them means
+  writing new rows under a version that already exists, and every install of an
+  installed version is refused -- a cartridge is pinned to the version it was
+  uploaded against, and overwriting the bytes would leave every pin pointing at
+  code that had changed underneath it;
+* an upload is not a change to the repository, so `git status` stays clean and
+  there is no untracked tree to review or revert;
+* the bytes live wherever `config/storage.yml` says, which is normally off the
+  app server entirely.
+
+That last one is the point of this document's next section.
 
 **The key is stored as a digest and nowhere else.** A SHA-256 digest, because a
 key has to be *looked up* by the thing it authenticates -- a salted bcrypt digest
@@ -127,7 +141,7 @@ read is worse than one they have to fetch twice.
 leaked key is retired; there is no separate revoke, because with one key at a
 time "give me a new one" and "this one is dead" are the same request.
 
-`vendor/console/<version>/` is now a console release rather than a bare library,
+A stored release is a console release rather than a bare library,
 so `ConsoleLibrary#file_paths` (the manifest, from `app/main.rb`'s require list)
 and `LibraryBundle#release_paths` (the download, everything a person needs) are
 deliberately different sets. The runtime must serve exactly what it requires; the
@@ -299,30 +313,30 @@ leaderboard run comparable with the run beside it.
 To add a version:
 
 ```sh
-cp -r /path/to/console vendor/console/0.2.0     # trim it to app/ + fonts
-bin/rails console:install VERSION=0.2.0 DEFAULT=true
+bin/rails console:install PATH=/path/to/console DEFAULT=true
 bin/rails console:status
 ```
 
 or upload a ZIP at `/admin/console_versions/new`.
 
 `console:install` reads the version out of the library's own
-`app/console/version.rb` and refuses a directory whose name disagrees with it.
+`app/console/version.rb` and refuses a checkout whose `PATH` disagrees with it.
 The upload screen reads it from the same file and installs under it, so an
 archive cannot be installed under a label its own code disagrees with.
 
 Both paths run the same checks through `ConsoleLibraryInstall.inspect`, so a
 library cannot be accepted by the task and refused by the screen, or the
 reverse. The task is still the better route when the library is already in a
-checkout: an upload lands in `vendor/console/` as untracked files, where
-`git status` shows it and a commit records who added it.
+checkout, because it reads the files where they are rather than asking for them
+to be zipped first. Neither path writes to the repository: the files land as
+blobs against the version row, and an upload is not a commit.
 
 ### Installing is not updating
 
 Neither path will replace an installed version, and the reason is specific
 rather than cautious. Pinning is what makes a leaderboard run comparable with
 the run beside it, and a cartridge's pin is the version *label* &mdash; the
-`console_versions` row. Overwriting `vendor/console/0.2.0/` would leave every
+`console_versions` row. Overwriting the files behind it would leave every
 label, every pin and every admin page looking exactly as they did while changing
 the code every cartridge on that version runs. Nothing would report a problem.
 The scores would simply stop meaning anything.
@@ -354,11 +368,62 @@ it were fine, then missing from every cartridge's served tree.
 the cartridge upload and the library upload. A traversal guard written twice is
 a traversal guard that will eventually exist once.
 
+## Where the files live
+
+Every console library file and every cartridge file is an Active Storage blob.
+The service is chosen per environment, and in production it is an environment
+variable rather than a line of code:
+
+```yaml
+# config/environments/production.rb
+config.active_storage.service = ENV.fetch("ACTIVE_STORAGE_SERVICE", "local").to_sym
+```
+
+`config/storage.yml` defines `local` (a directory under `storage/`) and `amazon`
+(S3, read entirely from the environment). `amazon` is S3 by protocol as well as
+by name, so it is also the config for R2, MinIO and the rest: set `AWS_ENDPOINT`
+and leave `AWS_FORCE_PATH_STYLE=true` for a store that is not AWS.
+
+To put the files in a bucket, set these in `config/deploy.yml`:
+
+```yaml
+env:
+  ACTIVE_STORAGE_SERVICE: amazon
+  AWS_BUCKET: your-bucket
+  AWS_REGION: us-east-1
+  AWS_ACCESS_KEY_ID: <%= ENV["AWS_ACCESS_KEY_ID"] %>
+  AWS_SECRET_ACCESS_KEY: <%= ENV["AWS_SECRET_ACCESS_KEY"] %>
+```
+
+**Setting the service moves nothing that is already stored.** A blob records the
+service it was written to and reads from that one for the rest of its life, so a
+deployment that flips the variable and redeploys without copying serves every
+cartridge and every library file out of a local disk that no longer exists --
+on Kamal, an empty directory on a fresh container. So the failure is not a slow
+read but a file that is simply not there. Copy first:
+
+```sh
+bin/rails active_storage:copy_blobs TO=amazon DRY_RUN=true   # what would move
+bin/rails active_storage:copy_blobs TO=amazon
+```
+
+It reads each blob from the service that blob names, so it is correct while the
+two sets are mixed, and safe to interrupt and re-run. Keys are preserved rather
+than regenerated, so no attachment is repointed and a URL handed out yesterday
+still resolves today.
+
+Note that this app streams library bytes through Rails rather than redirecting
+to them (`CartridgeRuntimeController` reads the blob and sends it with a content
+type guessed from the path). That works against any service, and is what lets the
+served content type be decided per file -- but it means every game file is
+fetched by the app, so a remote service saves the app's disk, not its bandwidth.
+
 ## Layout
 
 ```
-app/services/console_library.rb     one vendored library version, as served
+app/services/console_library.rb     one library version, read from its blobs
 app/services/console_library_install.rb  a new version, from an archive or a directory
+app/models/console_library_file.rb   one file of a version, as a blob + a path
 app/services/concerns/safe_archive.rb    the ZIP refusals both upload paths share
 app/services/cartridge_stager.rb    the served tree + the manifest
 app/services/cartridge_ingest.rb    ZIP -> cartridge, or the reason why not
@@ -369,8 +434,9 @@ app/controllers/admin/base_controller.rb          the admin gate: a 404, not a r
 app/controllers/admin/console_versions_controller.rb   versions, and installing one
 app/controllers/concerns/cross_origin_isolation.rb  COOP/COEP for the wasm build
 public/dragonruby/                  the DragonRuby HTML5 wasm build
-vendor/console/<version>/           vendored console libraries
+config/storage.yml                  where the blobs live: local disk or a bucket
 lib/tasks/console.rake              console:install, console:status
+lib/tasks/active_storage.rake       active_storage:copy_blobs, moving to a bucket
 ```
 
 ## Admin
