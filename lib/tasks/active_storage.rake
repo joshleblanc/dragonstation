@@ -12,8 +12,8 @@ require "securerandom"
 #
 # This copies the bytes across and repoints the rows.
 #
-#   bin/rails active_storage:copy_blobs TO=amazon
-#   bin/rails active_storage:copy_blobs TO=amazon DRY_RUN=true
+#   bin/rails active_storage:copy_blobs TO=digitalocean
+#   bin/rails active_storage:copy_blobs TO=digitalocean DRY_RUN=true
 #
 # Run it while the blobs still name their old service. No FROM is needed,
 # because each blob is read from the service it names -- which is what keeps this
@@ -62,9 +62,9 @@ module CopyBlobs
 end
 
 namespace :active_storage do
-  desc "Copy stored files to another Active Storage service (TO=amazon)"
+  desc "Copy stored files to another Active Storage service (TO=digitalocean)"
   task copy_blobs: :environment do
-    name = ENV["TO"].presence or abort "active_storage: no TO given. Run: bin/rails active_storage:copy_blobs TO=amazon"
+    name = ENV["TO"].presence or abort "active_storage: no TO given. Run: bin/rails active_storage:copy_blobs TO=digitalocean"
     dry_run = ActiveModel::Type::Boolean.new.cast(ENV.fetch("DRY_RUN", "false"))
 
     if ENV["FROM"].present?

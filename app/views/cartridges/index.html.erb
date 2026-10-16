@@ -43,7 +43,7 @@
   <p class="console-note">
     Running console <strong><%= @console_versions.first&.version || "none installed" %></strong>.
     <% unless @console_versions.first&.available? %>
-      <span class="warn">No library is installed &mdash; run <code>bin/rails console:install</code>.</span>
+      <span class="warn">No library is installed &mdash; run <code>bin/rails console:install CONSOLE_PATH=...</code>.</span>
     <% end %>
   </p>
 <% end %>

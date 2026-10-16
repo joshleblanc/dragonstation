@@ -11,11 +11,39 @@ server describes rather than a file the server stores.
 
 ```
 bin/rails db:prepare
-bin/rails console:install DEFAULT=true
+bin/rails console:install CONSOLE_PATH=../dragonruby/console DEFAULT=true
 bin/rails server
 ```
 
 Then sign in, upload a ZIP of a cart directory, and publish it.
+
+The first account you register becomes the administrator, which matters before
+you have a console installed: `/admin/console_versions/new` is where the very
+first version has to come from, and nothing else will get it there for you. The
+task above is the way to do it from a checkout. There is no way to do it with
+`bin/publish-console`, and that is deliberate &mdash; see [Bootstrapping](#bootstrapping).
+
+### Bootstrapping
+
+A fresh host has no console library, and the console's own release script cannot
+put one there. `bin/publish-console` refuses to run without `dragonstation.json`,
+that file arrives only inside `/console/bundle.zip`, and that download is built
+from an installed version &mdash; so it is 404 until there is one. The console
+cannot bootstrap the site.
+
+What can:
+
+- `bin/rails console:install CONSOLE_PATH=<checkout>`, which needs no key and no
+  network. This is the intended first step, and it is what the quickstart above
+  runs. On a deployed host the checkout has to be reachable from the app, which
+  usually means copying it in and running the task through `bin/kamal`.
+- `bin/publish-console --pack-only`, which builds the release ZIP and sends
+  nothing, followed by uploading that ZIP at `/admin/console_versions/new`. This
+  is the same install the task does, reached through the browser.
+
+After either one, make the version the default. Only then does
+`/console/bundle.zip` resolve, which is where `dragonstation.json` comes from
+&mdash; and from then on `bin/publish-console` works like it is meant to.
 
 ## What a cartridge is
 
@@ -313,16 +341,24 @@ leaderboard run comparable with the run beside it.
 To add a version:
 
 ```sh
-bin/rails console:install PATH=/path/to/console DEFAULT=true
+bin/rails console:install CONSOLE_PATH=/path/to/console DEFAULT=true
 bin/rails console:status
 ```
 
 or upload a ZIP at `/admin/console_versions/new`.
 
 `console:install` reads the version out of the library's own
-`app/console/version.rb` and refuses a checkout whose `PATH` disagrees with it.
-The upload screen reads it from the same file and installs under it, so an
-archive cannot be installed under a label its own code disagrees with.
+`app/console/version.rb` and refuses a checkout whose declared version disagrees
+with the row it would land on. The upload screen reads it from the same file and
+installs under it, so an archive cannot be installed under a label its own code
+disagrees with.
+
+Only the release is read out of the checkout &mdash; `ConsoleRelease` names what
+that is, and `LibraryBundle` uses the same list to build a download. A checkout
+also holds build output, screenshots, the cart you are working on, and
+`dragonstation.json`; none of that is part of a console version, and installing
+all of it is how a 3.9MB release turned into 104MB of blobs and put a live API
+key in the library the site serves.
 
 Both paths run the same checks through `ConsoleLibraryInstall.inspect`, so a
 library cannot be accepted by the task and refused by the screen, or the
@@ -346,6 +382,15 @@ a change is to bump `MAJOR.MINOR.PATCH` in `app/console/version.rb` and upload i
 again as a new version. `console:install` stays idempotent &mdash; re-running it
 on a checkout registers what is already there &mdash; but it registers, and never
 rewrites files in place.
+
+There is one exception, and it is not an exception to the rule so much as the
+absence of the thing the rule protects. A version row with no files behind it has
+no bytes anybody has ever run: no manifest, no served module, nothing that could
+have been loaded. It is an install that did not finish &mdash; an interrupted
+deploy, or a deploy onto a fresh container while the blobs still name a disk
+that is not there &mdash; and `console:install` fills it in rather than adopting
+the row as it is. `console:status` reports it as `MISSING library files`, which
+is the same state that used to dead-end every path at once.
 
 ### What the upload is allowed to add
 
@@ -379,21 +424,40 @@ variable rather than a line of code:
 config.active_storage.service = ENV.fetch("ACTIVE_STORAGE_SERVICE", "local").to_sym
 ```
 
-`config/storage.yml` defines `local` (a directory under `storage/`) and `amazon`
-(S3, read entirely from the environment). `amazon` is S3 by protocol as well as
-by name, so it is also the config for R2, MinIO and the rest: set `AWS_ENDPOINT`
-and leave `AWS_FORCE_PATH_STYLE=true` for a store that is not AWS.
+`config/storage.yml` defines `local` (a directory under `storage/`), `digitalocean`
+(a private DigitalOcean Spaces bucket &mdash; the production service) and
+`amazon` (S3, read entirely from the environment).
 
-To put the files in a bucket, set these in `config/deploy.yml`:
+DigitalOcean and AWS are both `service: S3`, and they are separate entries on
+purpose: the service name is what a blob records in `service_name`, so
+`copy_blobs TO=<name>` and `blob.service` both speak it. An entry named `amazon`
+silently pointed at Spaces is the kind of lie that costs an afternoon. Spaces'
+endpoint is derived from its region, so the two cannot go out of step, and
+`force_path_style` is false because Spaces wants subdomain-style requests.
+
+Keys come from `config/credentials/production.yml` under `digitalocean`, with an
+environment fallback if a deploy would rather inject them:
+
+```sh
+bin/rails credentials:edit -e production   # digitalocean.access_key_id / .secret_access_key
+```
+
+Region and bucket are deployment facts and live in `config/deploy.yml`:
 
 ```yaml
 env:
-  ACTIVE_STORAGE_SERVICE: amazon
-  AWS_BUCKET: your-bucket
-  AWS_REGION: us-east-1
-  AWS_ACCESS_KEY_ID: <%= ENV["AWS_ACCESS_KEY_ID"] %>
-  AWS_SECRET_ACCESS_KEY: <%= ENV["AWS_SECRET_ACCESS_KEY"] %>
+  clear:
+    ACTIVE_STORAGE_SERVICE: digitalocean
+    DIGITALOCEAN_REGION: nyc3
+    DIGITALOCEAN_BUCKET: your-bucket
 ```
+
+**The bucket is private and must stay private.** Nothing is served from it
+directly &mdash; every console module and cartridge file is read back through
+`CartridgeRuntimeController`, which chooses its own content type. A public bucket
+would put the same bytes on the internet twice, one of them without the
+`.rb`-only check that stops `app/console/payload.html` being handed to a browser
+as `text/html` from this origin.
 
 **Setting the service moves nothing that is already stored.** A blob records the
 service it was written to and reads from that one for the rest of its life, so a
@@ -403,8 +467,8 @@ on Kamal, an empty directory on a fresh container. So the failure is not a slow
 read but a file that is simply not there. Copy first:
 
 ```sh
-bin/rails active_storage:copy_blobs TO=amazon DRY_RUN=true   # what would move
-bin/rails active_storage:copy_blobs TO=amazon
+bin/rails active_storage:copy_blobs TO=digitalocean DRY_RUN=true   # what would move
+bin/rails active_storage:copy_blobs TO=digitalocean
 ```
 
 It reads each blob from the service that blob names, so it is correct while the
@@ -423,6 +487,7 @@ fetched by the app, so a remote service saves the app's disk, not its bandwidth.
 ```
 app/services/console_library.rb     one library version, read from its blobs
 app/services/console_library_install.rb  a new version, from an archive or a directory
+app/services/console_release.rb      what a console is, as opposed to a checkout
 app/models/console_library_file.rb   one file of a version, as a blob + a path
 app/services/concerns/safe_archive.rb    the ZIP refusals both upload paths share
 app/services/cartridge_stager.rb    the served tree + the manifest

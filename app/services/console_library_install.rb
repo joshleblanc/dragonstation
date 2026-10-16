@@ -95,11 +95,18 @@ class ConsoleLibraryInstall
   # for an upload. The single definition of "a console on disk", used by both
   # inspection and installation so the two cannot disagree about what a checkout
   # contains.
+  #
+  # Only the release, and not the directory around it. A checkout is a console
+  # plus whatever the person developing it has accumulated -- build output,
+  # screenshots, the cart they are working on -- and reading all of it stored
+  # 104MB where a release is 3.9MB. It also read `dragonstation.json`, a live
+  # API key, into the library the site serves. ConsoleRelease is the allowlist;
+  # see it for why it is an allowlist.
   def self.directory_entries(directory)
     directory = Pathname.new(directory.to_s)
 
-    directory.glob("**/*").select { |file| file.file? }.to_h do |file|
-      [ file.relative_path_from(directory).to_s, file.binread ]
+    ConsoleRelease.paths_on_disk(directory).to_h do |path|
+      [ path, (directory + path).binread ]
     end
   end
 
@@ -164,15 +171,66 @@ class ConsoleLibraryInstall
         notes: notes.presence || "Installed from an uploaded ZIP."
       )
 
-      # Created rather than built on a relation: each file is attached with
-      # its own blob, so this is one INSERT and one blob write per file.
-      entries.sort.each do |path, bytes|
-        file = console_version.console_library_files.create!(path: path, byte_size: bytes.bytesize)
-        file.blob.attach(io: StringIO.new(bytes), filename: File.basename(path))
-      end
+      self.class.attach_files(console_version, entries)
 
       console_version
     end
+  end
+
+  # Put the files behind a row that exists but has none.
+  #
+  # A row with no files is not an older version of "already installed", it is an
+  # install that did not finish -- a migration from a directory the blobs had not
+  # been copied into yet, an interrupted deploy, a deploy onto a fresh container
+  # while the blobs named a disk that is not there. Every other path refuses to
+  # touch it, because the one rule here is that the bytes behind an installed
+  # version are never rewritten, and a cartridge pinned to it would run whatever
+  # turned up afterwards.
+  #
+  # That rule is about the bytes. A row with no bytes has no bytes anybody has
+  # ever run: there is no manifest, no served module, nothing that could have
+  # been loaded. So filling it in cannot change what a cartridge runs -- it can
+  # only turn a version that serves nothing into one that serves something. This
+  # is the one case where the task repairs rather than adopts.
+  #
+  # The version these bytes declare still has to be the row's version. Anything
+  # else would be the exact drift `label_matches_contents?` exists to catch,
+  # created here instead of detected there.
+  def self.restore!(source, console_version)
+    entries = source.is_a?(Hash) ? source : directory_entries(source)
+
+    declared, problems = inspect(entries)
+
+    problems = problems.dup
+    if declared.present? && declared != console_version.version
+      problems << "these files declare #{declared}, but the row is labelled " \
+                  "#{console_version.version}. Refusing to fill in a version whose label " \
+                  "its contents disagree with."
+    end
+
+    raise Invalid, problems if problems.any?
+
+    ConsoleVersion.transaction do
+      attach_files(console_version, entries)
+      console_version
+    end
+  end
+
+  # One blob per file, on the row that owns them.
+  #
+  # Created rather than built on a relation: each file is attached with its own
+  # blob, so this is one INSERT and one blob write per file.
+  #
+  # Public for the same reason `publish` is. Two call sites reach this -- the
+  # instance method `publish` and the class method `restore!` -- and a private
+  # class method would be reachable from only one of them.
+  def self.attach_files(console_version, entries)
+    entries.sort.each do |path, bytes|
+      file = console_version.console_library_files.create!(path: path, byte_size: bytes.bytesize)
+      file.blob.attach(io: StringIO.new(bytes), filename: File.basename(path))
+    end
+
+    console_version
   end
 
   private

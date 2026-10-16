@@ -26,24 +26,33 @@ Rails.application.configure do
   # Read from the environment rather than pinned, because the choice of service
   # is a deployment fact rather than a code fact: local disk is fine on one box
   # but its contents do not survive a replacement, and every console library
-  # file -- and every cartridge file -- is in here. Point ACTIVE_STORAGE_SERVICE
-  # at "amazon" in Kamal to put them in a bucket instead.
+  # file -- and every cartridge file -- is in here. Kamal sets this to
+  # "digitalocean", a private Spaces bucket, because a console version is
+  # permanent and the bytes behind a pin must outlive the machine serving them.
   #
   # The default stays :local so a deployment that has not chosen yet still boots.
   # Note that switching this does NOT move anything already uploaded: a blob
-  # records the service it was written to. Run `bin/rails active_storage:copy_blobs`
-  # before or after the switch, or the old blobs keep resolving to the local disk
-  # that is about to stop existing.
+  # records the service it was written to. Run `bin/rails active_storage:copy_blobs
+  # TO=digitalocean` before or after the switch, or the old blobs keep resolving
+  # to the local disk that is about to stop existing -- which on Kamal is a fresh
+  # empty directory on a fresh container, so the failure is not a slow read but a
+  # file that is simply not there.
   config.active_storage.service = ENV.fetch("ACTIVE_STORAGE_SERVICE", "local").to_sym
 
   # Assume all access to the app is happening through a SSL-terminating reverse proxy.
-  # config.assume_ssl = true
+  config.assume_ssl = true
 
   # Force all access to the app over SSL, use Strict-Transport-Security, and use secure cookies.
-  # config.force_ssl = true
+  config.force_ssl = true
 
   # Skip http-to-https redirect for the default health check endpoint.
-  # config.ssl_options = { redirect: { exclude: ->(request) { request.path == "/up" } } }
+  #
+  # The exclusion is not optional here. Kamal polls /up from *inside* the
+  # container, over http, before it will route traffic to the container. With
+  # force_ssl on, /up answers 301 instead of 200, and Kamal's health check
+  # greps the body for "OK" -- so a redirected health check reads as an
+  # unhealthy container and every deploy stops short of the switch.
+  config.ssl_options = { redirect: { exclude: ->(request) { request.path == "/up" } } }
 
   # Log to STDOUT with the current request id as a default log tag.
   config.log_tags = [ :request_id ]
@@ -70,7 +79,11 @@ Rails.application.configure do
   # config.action_mailer.raise_delivery_errors = false
 
   # Set host to be used by links generated in mailer templates.
-  config.action_mailer.default_url_options = { host: "example.com" }
+  #
+  # This is the app's public address, so it has to be the one Kamal puts in
+  # front of the container: a password reset is only useful if the link it
+  # carries lands somewhere real. force_ssl above makes these https.
+  config.action_mailer.default_url_options = { host: "dragonstation.jleb.dev" }
 
   # Specify outgoing SMTP server. Remember to add smtp/* credentials via bin/rails credentials:edit.
   # config.action_mailer.smtp_settings = {

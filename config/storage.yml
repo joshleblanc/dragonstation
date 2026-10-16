@@ -31,6 +31,47 @@ amazon:
   # would force path-style addressing onto a bucket that cannot use it.
   force_path_style: <%= ActiveModel::Type::Boolean.new.cast(ENV.fetch("AWS_FORCE_PATH_STYLE", "false")) %>
 
+# DigitalOcean Spaces, which speaks the S3 API. This is the production service.
+#
+# A separate entry from `amazon` even though both are `service: S3`, because the
+# name is what a blob records: `active_storage:copy_blobs TO=<name>` and
+# `blob.service_name` both speak it, and "TO=amazon" while writing to Spaces is
+# the kind of lie that costs an afternoon. It also keeps the DigitalOcean
+# specifics -- the endpoint shape, virtual-host addressing -- in one place
+# instead of smeared across an entry named after a different company.
+#
+# **The bucket is private and must stay private.** Nothing here is served
+# directly: a cartridge's manifest entries and every console library module are
+# read through the app by CartridgeRuntimeController, which picks its own
+# content type. A public bucket would mean the same bytes are reachable twice,
+# one of them without the ALLOWED_MODULE check that stops app/console/payload.html
+# being handed to a browser as text/html from this origin.
+#
+# Keys come from credentials rather than the environment, unlike `amazon` above.
+# Both keep secrets out of git; the difference is that RAILS_MASTER_KEY is
+# already a Kamal secret here, so credentials cost no extra deploy plumbing. The
+# ENV fallback is there so a deploy can inject them instead without a code
+# change.
+#
+# Region and bucket are deployment facts and live in config/deploy.yml. The
+# endpoint is derived from the region rather than set separately, because those
+# two going out of step is a confusing error to read.
+digitalocean:
+  service: S3
+  access_key_id: <%= Rails.application.credentials.dig(:digitalocean, :access_key_id) || ENV["DIGITALOCEAN_ACCESS_KEY_ID"] %>
+  secret_access_key: <%= Rails.application.credentials.dig(:digitalocean, :secret_access_key) || ENV["DIGITALOCEAN_SECRET_ACCESS_KEY"] %>
+  # Spaces validates the region but sends the request to the endpoint below, so
+  # this names the bucket's location rather than an AWS datacenter. The default
+  # is only a default; config/deploy.yml sets it to the real one.
+  region: <%= ENV["DIGITALOCEAN_REGION"] || "nyc3" %>
+  bucket: <%= ENV["DIGITALOCEAN_BUCKET"] %>
+  endpoint: <%= ENV["DIGITALOCEAN_ENDPOINT"] || "https://#{ENV['DIGITALOCEAN_REGION'] || 'nyc3'}.digitaloceanspaces.com" %>
+  # false, which is what Spaces' docs call for: subdomain-style requests
+  # (https://<bucket>.<region>.digitaloceanspaces.com/<key>). The aws service
+  # above defaults this to true only because it exists for AWS, where that
+  # addressing fails.
+  force_path_style: <%= ActiveModel::Type::Boolean.new.cast(ENV.fetch("DIGITALOCEAN_FORCE_PATH_STYLE", "false")) %>
+
 # Remember not to checkin your GCS keyfile to a repository
 # google:
 #   service: GCS

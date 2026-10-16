@@ -256,6 +256,69 @@ class ConsoleLibraryInstallTest < ActiveSupport::TestCase
     assert_empty ConsoleVersion.all
   end
 
+  test "installs the release out of a checkout and not the checkout" do
+    # A checkout is a console plus whatever the person developing it has
+    # accumulated. Only the first half is a version, and the difference is not
+    # cosmetic: builds/ and the cart under carts/ turned a 3.9MB release into
+    # 104MB of blobs, and dragonstation.json is a live API key that has no
+    # business in the library the site serves.
+    version = ConsoleLibraryInstall.install!(
+      checkout("0.4.0",
+        "builds/tmp/out.png" => "x",
+        "carts/arcade/app/arcade.rb" => "x",
+        "shots/1.png" => "x",
+        "errors/last.txt" => "x",
+        "dragonstation.json" => '{"api_key":"ds_live_deadbeef"}')
+    )
+
+    paths = version.console_library_files.pluck(:path)
+
+    assert_equal %w[app/console/core.rb app/console/version.rb app/main.rb], paths.sort
+    assert_not_includes paths, "dragonstation.json"
+    assert version.library.label_matches_contents?
+  end
+
+  test "a restored version gets the files an interrupted install never wrote" do
+    # A row with no bytes has served nothing and run nothing, so filling it in
+    # is the one case where install may write files behind an existing version.
+    row = ConsoleVersion.create!(version: "0.5.0", default: true)
+
+    assert_not row.available?
+
+    restored = ConsoleLibraryInstall.restore!(checkout("0.5.0"), row)
+
+    assert_equal "0.5.0", restored.version
+    assert_equal row.id, restored.id
+    assert restored.reload.available?
+    assert restored.library.label_matches_contents?
+    assert_equal 1, ConsoleVersion.where(version: "0.5.0").count
+  end
+
+  test "a restore refuses files belonging to a different version" do
+    # Otherwise this is how the drift label_matches_contents? exists to catch
+    # gets created instead of detected: a row saying 0.5.0 running code that
+    # calls itself 0.6.0.
+    row = ConsoleVersion.create!(version: "0.5.0")
+
+    error = assert_raises(ConsoleLibraryInstall::Invalid) do
+      ConsoleLibraryInstall.restore!(checkout("0.6.0"), row)
+    end
+
+    assert_match(/declare 0\.6\.0, but the row is labelled 0\.5\.0/, error.message)
+    assert_not row.reload.available?
+    assert_empty row.console_library_files
+  end
+
+  test "a restore of a broken library leaves the row empty" do
+    row = ConsoleVersion.create!(version: "0.5.0")
+    dir = checkout("0.5.0")
+    FileUtils.rm(File.join(dir, "app/console/core.rb"))
+
+    assert_raises(ConsoleLibraryInstall::Invalid) { ConsoleLibraryInstall.restore!(dir, row) }
+
+    assert_empty row.reload.console_library_files
+  end
+
   private
     def install(version, prefix: nil)
       entries = console_library_entries(version)

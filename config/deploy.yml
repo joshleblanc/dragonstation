@@ -7,7 +7,7 @@ image: dragonstation
 # Deploy to these servers.
 servers:
   web:
-    - 192.168.0.1
+    - 147.189.173.240
   # job:
   #   hosts:
   #     - 192.168.0.1
@@ -20,9 +20,9 @@ servers:
 #
 # Don't use this when deploying to multiple web servers (then you have to terminate SSL at your load balancer).
 #
-# proxy:
-#   ssl: true
-#   host: app.example.com
+proxy:
+  ssl: true
+  host: dragonstation.jleb.dev
 
 # Where you keep your container images.
 registry:
@@ -48,6 +48,23 @@ env:
     # Set number of processes dedicated to Solid Queue (default: 1)
     # JOB_CONCURRENCY: 3
 
+    # Blobs -- every console library file and every cartridge file -- go to a
+    # private DigitalOcean Spaces bucket rather than to the container's disk. The
+    # service name matches the entry in config/storage.yml, and a blob records
+    # the service it was written to, so this is also what
+    # `active_storage:copy_blobs TO=digitalocean` is given.
+    ACTIVE_STORAGE_SERVICE: digitalocean
+
+    # Region and bucket are deployment facts, so they live here. The endpoint is
+    # derived from the region in config/storage.yml (tor1 ->
+    # https://tor1.digitaloceanspaces.com); set DIGITALOCEAN_ENDPOINT only if you
+    # are pointed somewhere unusual.
+    #
+    # The bucket must be private. Everything is read back through the app, which
+    # is what enforces the .rb-only rule on served console modules.
+    DIGITALOCEAN_REGION: tor1
+    DIGITALOCEAN_BUCKET: dragonstation-production
+
     # Set number of cores available to the application on each server (default: 1).
     # WEB_CONCURRENCY: 2
 
@@ -66,8 +83,12 @@ aliases:
   logs: app logs -f
   dbc: app exec --interactive --reuse "bin/rails dbconsole --include-password"
 
-# Use a persistent storage volume for sqlite database files and local Active Storage files.
-# Recommended to change this to a mounted volume path that is backed up off server.
+# Use a persistent storage volume for sqlite database files.
+#
+# Blobs no longer need this: ACTIVE_STORAGE_SERVICE above puts them in Spaces,
+# so /rails/storage only holds the database now. Keep the volume anyway --
+# losing it loses every cartridge, user and console version row, and those are
+# not the kind of thing a redeploy should be able to take with it.
 volumes:
   - "dragonstation_storage:/rails/storage"
 

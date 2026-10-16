@@ -25,41 +25,10 @@ class LibraryBundle
   # it is obvious what it is when it turns up in a git status.
   CREDENTIALS_PATH = "dragonstation.json"
 
-  # Whole directories, walked as they are.
-  #
-  # app/ rather than the require list, deliberately: the runtime serves exactly
-  # what app/main.rb requires, but a *console* should carry its source, so a
-  # module that exists but is not yet required still arrives.
-  RELEASE_DIRECTORIES = %w[app bin sprites metadata].freeze
-
-  # Individual files, named rather than walked.
-  #
-  # errors/ is here as its readme and not as a directory: errors/last.txt is
-  # written by whichever cart crashed last, and a download should not ship
-  # somebody else's crash. shots/ is written by --shot and is not in the release
-  # at all.
-  RELEASE_FILES = %w[
-    font.ttf
-    tiny.ttf
-    README.md
-    .gitignore
-    .gitattributes
-    errors/readme.txt
-    carts/README.md
-  ].freeze
-
-  # Releasing a new console version is an administrator's job, and the script
-  # that does it is only in an administrator's bundle.
-  #
-  # It lives in the console repository like any other script -- one copy, not one
-  # per download -- and is held back here rather than shipped to everyone, both
-  # because handing out an admin capability to every reader is noise, and because
-  # the public download is what `./update-library` pulls, and a console that
-  # grew a release tool should not grow one for people who cannot use it.
-  #
-  # Nothing here is the control: `/api/console_versions` resolves the key to its
-  # owner and refuses anybody who is not an admin. This is the convenience.
-  RELEASE_SCRIPTS = %w[bin/publish-console bin/publish-console.bat].freeze
+  # What a release contains is ConsoleRelease's answer, not this class's. It used
+  # to keep its own copy, which is how a download and a rake install came to hold
+  # different sets of files from the same console.
+  RELEASE_SCRIPTS = ConsoleRelease::RELEASE_SCRIPTS
 
   # Deliberately not a dotfile: a dotfile is invisible to `ls`, and this is the
   # first thing a reader should see in an unpacked console.
@@ -153,11 +122,7 @@ class LibraryBundle
     # required still arrives. Sorted so two downloads of the same version
     # produce the same archive in the same order.
     def base_release_paths
-      (RELEASE_DIRECTORIES.flat_map { |dir| library.paths_under(dir) } + RELEASE_FILES - RELEASE_SCRIPTS)
-        .select { |path| library.file?(path) }
-        .uniq
-        .sort
-        .freeze
+      ConsoleRelease.paths(library.paths).reject { |path| RELEASE_SCRIPTS.include?(path) }.freeze
     end
 
     EXECUTABLE = 0o755

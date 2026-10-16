@@ -27,8 +27,19 @@ class ConsoleVersion < ApplicationRecord
   end
 
   # The library this row points at.
+  #
+  # Cleared on reload: @library is a plain ivar, so ActiveRecord does not know
+  # about it and a reload would leave a library that was read before the files
+  # existed still answering "no app/main.rb" afterwards. That matters when a
+  # broken install is repaired -- `console:install` fills an empty row in, and
+  # every holder of the object must see the version it just became.
   def library
     @library ||= ConsoleLibrary.new(self)
+  end
+
+  def reload(options = nil)
+    @library = nil
+    super
   end
 
   def available? = library.available?
