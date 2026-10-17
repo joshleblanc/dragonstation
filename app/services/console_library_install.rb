@@ -177,15 +177,17 @@ class ConsoleLibraryInstall
     end
   end
 
-  # Put the files behind a row that exists but has none.
+  # Put the files behind a row that exists but cannot be read.
   #
-  # A row with no files is not an older version of "already installed", it is an
-  # install that did not finish -- a migration from a directory the blobs had not
-  # been copied into yet, an interrupted deploy, a deploy onto a fresh container
-  # while the blobs named a disk that is not there. Every other path refuses to
-  # touch it, because the one rule here is that the bytes behind an installed
-  # version are never rewritten, and a cartridge pinned to it would run whatever
-  # turned up afterwards.
+  # "No files" means no *readable* files, and there are two shapes of it: a row
+  # the install never wrote file rows for, and a row whose rows are all present
+  # and whose blobs are on a service this process cannot fetch them from -- a
+  # migration from a directory the blobs had not been copied into yet, an
+  # interrupted deploy, a deploy onto a fresh container while the blobs named a
+  # disk that is not there. Every other path refuses to touch either, because the
+  # one rule here is that the bytes behind an installed version are never
+  # rewritten, and a cartridge pinned to it would run whatever turned up
+  # afterwards.
   #
   # That rule is about the bytes. A row with no bytes has no bytes anybody has
   # ever run: there is no manifest, no served module, nothing that could have
@@ -211,6 +213,15 @@ class ConsoleLibraryInstall
     raise Invalid, problems if problems.any?
 
     ConsoleVersion.transaction do
+      # The rows a did-not-finish install left behind are not the library. They
+      # point at blobs on a service that does not have them, or at nothing, and
+      # path is unique per version, so they have to go before the real ones can
+      # land. Destroying them changes nothing a cartridge could run: a version
+      # that cannot be read serves no tree at all today, which is the same
+      # argument that makes writing files here safe in the first place. Rolled
+      # back with the attach if the attach fails.
+      console_version.console_library_files.destroy_all
+
       attach_files(console_version, entries)
       console_version
     end

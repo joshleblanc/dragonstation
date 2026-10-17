@@ -62,7 +62,27 @@ class ConsoleLibrary
   # True when these bytes came from `entries:` rather than from the database.
   def candidate? = !@entries.nil?
 
-  def available? = file?(ENTRY_TEMPLATE)
+  # True when this library can be read: it has an entry point, and that entry
+  # point's bytes are actually where the library says they are.
+  #
+  # The second half is not belt-and-braces. This used to ask only whether a row
+  # named app/main.rb, which is a question about the database, and the answer
+  # told every caller in the app that a version whose blobs had been left behind
+  # on a disk this container does not have was fine to build against. The first
+  # read then raised ActiveStorage::FileNotFoundError from inside storage, and
+  # because every guard in the app -- the admin index, the docs pages, the
+  # upload dropdown, the stager -- wraps its reads in a rescue for
+  # ConsoleLibrary::Missing, none of them caught it. A version that could not
+  # serve anything took down every page that merely listed versions, and
+  # installing a working library beside it changed nothing, because the listing
+  # still walked the broken row.
+  #
+  # Candidates answer from the hash, which cannot lose a file it was handed.
+  def available?
+    return @available unless @available.nil?
+
+    @available = candidate? ? file?(ENTRY_TEMPLATE) : !!records[ENTRY_TEMPLATE]&.readable?
+  end
 
   def entry_source
     @entry_source ||= read(ENTRY_TEMPLATE)
@@ -113,7 +133,17 @@ class ConsoleLibrary
   def read(relative)
     entry = lookup(relative) or raise_missing(relative)
 
-    candidate? ? entry : entry.read
+    return entry if candidate?
+
+    entry.read
+  rescue ActiveStorage::FileNotFoundError, ActiveStorage::IntegrityError, ActiveRecord::RecordNotFound
+    # The row is here and the bytes are not, which is the same condition as a
+    # library that never had them: an install that cannot be read. Raised as
+    # what this exception has always meant rather than letting a storage error
+    # escape, because that is what the pages guarding a broken library already
+    # rescue, and it is what the stager's own MissingLibrary means too. The
+    # caller that wants to know *why* it is broken can look at the blob.
+    raise_missing(relative)
   end
 
   # A stable filetime for every file in this library.

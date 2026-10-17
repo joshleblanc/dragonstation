@@ -294,6 +294,27 @@ class ConsoleLibraryInstallTest < ActiveSupport::TestCase
     assert_equal 1, ConsoleVersion.where(version: "0.5.0").count
   end
 
+  test "a restore fills in a version whose blobs are gone" do
+    # The state a redeploy onto a fresh container leaves behind: the file rows are
+    # all still there, and none of the bytes behind them. Path is unique per
+    # version, so without clearing the stale rows first this is a uniqueness
+    # violation rather than the repair it is meant to be.
+    row = install("0.5.0")
+    lose_the_blobs!(row)
+
+    assert_not row.available?
+
+    restored = ConsoleLibraryInstall.restore!(checkout("0.5.0"), row).reload
+
+    assert_equal row.id, restored.id
+    assert restored.available?
+    assert restored.library.label_matches_contents?
+    assert_equal 1, ConsoleVersion.where(version: "0.5.0").count
+    # Refilled, not appended to: the same three paths, once each.
+    assert_equal %w[app/console/core.rb app/console/version.rb app/main.rb],
+      restored.console_library_files.ordered.pluck(:path)
+  end
+
   test "a restore refuses files belonging to a different version" do
     # Otherwise this is how the drift label_matches_contents? exists to catch
     # gets created instead of detected: a row saying 0.5.0 running code that

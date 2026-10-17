@@ -22,8 +22,15 @@ class ConsoleVersion < ApplicationRecord
 
   # What a new upload gets pinned to. The flag wins; otherwise the newest
   # version, so a fresh install with no flag set still uploads something.
+  #
+  # The fallback skips versions that cannot be read, because pinning a cartridge
+  # to one of those produces a game that can never boot: the pin is permanent, so
+  # the mistake is permanent too, and the fallback is the one path here that
+  # picks a version nobody chose. A version an admin has *flagged* is honoured
+  # either way -- that is a deliberate act, and an admin page showing it broken
+  # is where that gets answered.
   def self.default
-    default_first.where(default: true).first || newest_first.first
+    default_first.where(default: true).first || newest_first.find(&:available?)
   end
 
   # The library this row points at.

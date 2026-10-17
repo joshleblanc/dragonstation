@@ -10,7 +10,10 @@ class CartridgesController < ApplicationController
 
   def index
     @cartridges = Cartridge.published.recent_first.includes(:user, :console_version)
-    @console_versions = ConsoleVersion.default_first
+    # The resolved default rather than the top of the list, so a version that
+    # cannot be read -- sitting above the working one in the ordering -- does not
+    # make a site with a perfectly good library announce that it has none.
+    @console_version = ConsoleVersion.default
   end
 
   def show

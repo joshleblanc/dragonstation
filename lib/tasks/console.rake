@@ -56,8 +56,8 @@ namespace :console do
 
     if installed.nil?
       install_new(directory, declared, make_default: make_default)
-    elsif installed.console_library_files.none?
-      restore_empty(directory, installed, make_default: make_default)
+    elsif !installed.available?
+      restore_unreadable(directory, installed, make_default: make_default)
     else
       adopt(installed, directory, declared, make_default: make_default, force: force)
     end
@@ -81,14 +81,28 @@ namespace :console do
     end
   end
 
-  # A version nothing has ever run: the row is there and the files are not.
+  # A version that cannot be read: the row is there and nothing is behind it.
+  #
+  # Two shapes reach here, and they are the same state as far as anything that
+  # reads the library is concerned. Either the install never wrote its file rows,
+  # or it did and the blobs are on a service this process cannot fetch them from
+  # -- a deploy that changed ACTIVE_STORAGE_SERVICE and came up on a fresh
+  # container, which is exactly what lib/tasks/active_storage.rake describes. The
+  # second is the one that used to fall through to adopt, which reported
+  # "already installed" for a version that serves nothing and then died reading
+  # it. So the test is whether the library can be read, not how many rows it has.
   #
   # Its own branch rather than the adopt one, because adopting is exactly the
   # wrong verb -- it registers a label and moves on, which would leave the row
   # serving nothing while reporting success. FORCE does not apply either: FORCE
-  # means "adopt the row as it is", and as it is, it is empty.
-  def restore_empty(directory, installed, make_default:)
-    console_version = ConsoleLibraryInstall.restore!(directory, installed)
+  # means "adopt the row as it is", and as it is, it is unreadable.
+  def restore_unreadable(directory, installed, make_default:)
+    # Reloaded, because asking whether the version was readable above built the
+    # library that answered no, and that object still holds the file list it read
+    # then. ConsoleVersion#reload exists for exactly this: the repair happens
+    # behind the row, and every holder of the object has to see the version it
+    # just became.
+    console_version = ConsoleLibraryInstall.restore!(directory, installed).reload
 
     console_version.update!(
       title: "Console #{console_version.version}",
@@ -96,7 +110,7 @@ namespace :console do
     )
     apply_default(console_version, make_default)
 
-    puts "console: #{console_version.version} was installed with no files behind it and " \
+    puts "console: #{console_version.version} was installed but could not be read, and " \
          "served nothing. Filled in from #{directory}."
     puts "console: #{console_version.library.require_paths.size} modules, " \
          "fonts: #{console_version.library.fonts.join(', ')}" \

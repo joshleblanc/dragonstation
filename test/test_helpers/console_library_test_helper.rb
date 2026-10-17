@@ -66,6 +66,27 @@ module ConsoleLibraryTestHelper
     ConsoleLibraryInstall.new(archive: upload, title: title, notes: notes).call
   end
 
+  # The state a redeploy leaves behind when the blobs still name a service this
+  # process cannot fetch them from: every console_library_files row in place, and
+  # none of the bytes behind them. Changing ACTIVE_STORAGE_SERVICE and coming up
+  # on a fresh container produces exactly this, which is what
+  # lib/tasks/active_storage.rake exists to move across.
+  #
+  # Deleting the objects rather than the rows is the whole point. A row with no
+  # files at all is a different state, one the app has always reported as "no
+  # library files", and testing against that instead is how the two got confused:
+  # they look the same in the database and nothing alike in production.
+  #
+  # Reloaded, because ConsoleVersion#library memoizes and a test holding the
+  # version across this call would otherwise keep reading the library as it was.
+  def lose_the_blobs!(console_version)
+    console_version.console_library_files.each do |file|
+      file.blob.service.delete(file.blob.key)
+    end
+
+    console_version.reload
+  end
+
   # A library held in memory rather than in the database, for the tests that
   # read one directly -- the documentation extractor above all, which needs a
   # module that will not parse and could not be installed.

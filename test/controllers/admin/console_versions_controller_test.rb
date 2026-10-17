@@ -80,6 +80,41 @@ class Admin::ConsoleVersionsControllerTest < ActionDispatch::IntegrationTest
     assert_select ".state-bad", text: /no library files/
   end
 
+  test "a version whose bytes are gone renders rather than raising" do
+    # The same page, and the same state, reached the way a redeploy reaches it:
+    # the file rows are all still there and none of the bytes behind them are.
+    # Every guard on this screen asks the library whether it can be read, so if
+    # that asks the database instead of storage this is the request that 500s.
+    version = installed_version!("0.1.0")
+    lose_the_blobs!(version)
+
+    sign_in_as @admin
+
+    get admin_console_version_path(version)
+
+    assert_response :success
+    assert_select ".state-bad", text: /no library files/
+  end
+
+  test "a working version installed beside a broken one leaves the listing readable" do
+    # The report this fixes: a fresh deploy leaves a version nothing can read,
+    # then someone uploads one that works, and the pages that merely *list*
+    # versions still crash because the listing walks the broken row. Recovering
+    # the broken version is a separate job; the pages have to survive meanwhile.
+    broken = installed_version!("0.1.0")
+    lose_the_blobs!(broken)
+    installed_version!("0.2.0")
+
+    sign_in_as @admin
+
+    get admin_console_versions_path
+    assert_response :success
+    assert_select "td", text: /0\.2\.0/
+
+    get admin_console_version_path(broken)
+    assert_response :success
+  end
+
   test "the version page survives a library that lost a file" do
     # main.rb still names it, so the require list is intact and the library is
     # not gone -- but the bytes are. A page that raised here would be useless

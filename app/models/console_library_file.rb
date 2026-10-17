@@ -28,4 +28,28 @@ class ConsoleLibraryFile < ApplicationRecord
   def size_of = byte_size
 
   def read = blob.download
+
+  # Whether the bytes behind this row can actually be fetched.
+  #
+  # The row existing is a different question, and answering the wrong one is what
+  # made a broken install look installed. A blob records the service it was
+  # written to and reads from that one for the rest of its life, so changing
+  # ACTIVE_STORAGE_SERVICE and redeploying leaves every row in place and every
+  # object on the disk being left behind -- see lib/tasks/active_storage.rake for
+  # the failure that produces. The row count says an install happened; only this
+  # says whether there is anything left to serve.
+  #
+  # A HEAD against the service rather than a download, so the pages that ask
+  # whether a version is usable can ask without pulling its entry file down to
+  # find out that it is not there.
+  def readable?
+    object = blob
+    return false unless object
+
+    object.service.exist?(object.key)
+  rescue ActiveStorage::FileNotFoundError, ActiveRecord::RecordNotFound
+    # No blob row at all, which a purged attachment leaves behind. Same answer
+    # as an object that is gone: there is nothing here to read.
+    false
+  end
 end

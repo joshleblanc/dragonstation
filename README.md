@@ -384,13 +384,43 @@ on a checkout registers what is already there &mdash; but it registers, and neve
 rewrites files in place.
 
 There is one exception, and it is not an exception to the rule so much as the
-absence of the thing the rule protects. A version row with no files behind it has
-no bytes anybody has ever run: no manifest, no served module, nothing that could
-have been loaded. It is an install that did not finish &mdash; an interrupted
-deploy, or a deploy onto a fresh container while the blobs still name a disk
-that is not there &mdash; and `console:install` fills it in rather than adopting
-the row as it is. `console:status` reports it as `MISSING library files`, which
-is the same state that used to dead-end every path at once.
+absence of the thing the rule protects. A version that cannot be read has no bytes
+anybody has ever run: no manifest, no served module, nothing that could have been
+loaded. It is an install that did not finish &mdash; an interrupted deploy, or a
+deploy onto a fresh container while the blobs still name a disk that is not there
+&mdash; and `console:install` fills it in rather than adopting the row as it is.
+`console:status` reports it as `MISSING library files`.
+
+### A version whose bytes are gone
+
+Those two states &mdash; a row with no file rows, and a row whose file rows are all
+present and none of the blobs behind them are &mdash; look identical in the database
+and nothing alike in production. The second is what a redeploy onto a fresh
+container leaves behind when `ACTIVE_STORAGE_SERVICE` has changed: a blob records
+the service it was written to and reads from that one for the rest of its life, so
+every row is present and every object is on the disk being left behind.
+
+So "is this version usable" is a question about storage, and `ConsoleLibraryFile#readable?`
+asks it as one &mdash; a HEAD against the service the blob names, not a row count.
+`ConsoleLibrary#available?` is built on that rather than on "is there a row named
+`app/main.rb`", because every guard in the app is built on `available?`: the admin
+index, the docs pages, the upload dropdown, the stager. Asking the database instead
+meant every one of those waved a version that serves nothing through, and the first
+real read then raised `ActiveStorage::FileNotFoundError` from inside storage.
+
+That error was the reason the symptom was a crash on pages that merely *listed*
+versions. Each of those pages wraps its reads in a rescue for
+`ConsoleLibrary::Missing` &mdash; they exist precisely to show a broken library rather
+than die on one &mdash; and a storage error is not that exception, so none of them
+caught it. Installing a working library beside the broken one did not help either:
+the listing walks every version, so it still went through the broken row.
+
+`ConsoleLibrary#read` therefore translates a storage failure into
+`ConsoleLibrary::Missing`, which is what that exception has always meant and what
+the guards are written against, and `ConsoleVersion.default` skips an unreadable
+version in its fallback so a broken row cannot become what every new cartridge is
+pinned to. A version an admin has *flagged* as default is honoured either way: that
+is a deliberate act, and the admin pages are where it gets answered.
 
 ### What the upload is allowed to add
 

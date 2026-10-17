@@ -41,8 +41,12 @@
 
 <% if authenticated? && (Current.user.admin? || @cartridges.any?) %>
   <p class="console-note">
-    Running console <strong><%= @console_versions.first&.version || "none installed" %></strong>.
-    <% unless @console_versions.first&.available? %>
+    Running console <strong><%= @console_version&.version || "none installed" %></strong>.
+    <%# Both states say the same thing to a reader: nothing here can be played.
+        The default is nil when no version can be read at all, and can still be
+        present but broken when an admin flagged one by hand, which is what the
+        second branch is for. %>
+    <% if @console_version.nil? || !@console_version.available? %>
       <span class="warn">No library is installed &mdash; run <code>bin/rails console:install CONSOLE_PATH=...</code>.</span>
     <% end %>
   </p>

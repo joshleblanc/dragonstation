@@ -71,12 +71,34 @@ module CartridgeTestHelper
   # The real console checkout, so the library under test is the one that ships.
   # CONSOLE_PATH points at it; the sibling checkout is the default because that is
   # where it lives next to this repository.
-  def console_version!(version: CONSOLE_VERSION)
+  #
+  # Keyed on the version the checkout's own library declares, not on a constant
+  # written here. Those two drifting apart is not a hypothetical: the install
+  # labels its row from app/console/version.rb, so a constant left at the last
+  # release made this look for a row the install had never created, and the second
+  # call in a single test installed a second version over the top of it and died
+  # on the unique index. Nothing here should have to be bumped when the console
+  # ships.
+  def console_version!(version: CartridgeTestHelper.real_console_version)
     ConsoleVersion.find_by(version: version) ||
       install_real_console_library(version).tap { |installed| installed.update!(default: true) }
   end
 
-  CONSOLE_VERSION = "0.1.0"
+  # The version the checkout's library declares, which is the version
+  # ConsoleLibraryInstall will label its row with.
+  #
+  # Asked through the same inspect both install paths use, so this cannot answer
+  # something install would refuse -- and memoised per process alongside the
+  # entries, because it reads the whole tree to get one number.
+  def self.real_console_version
+    @real_console_version ||=
+      begin
+        declared, problems = ConsoleLibraryInstall.inspect(console_entries)
+        raise "console checkout is not installable: #{problems.join('; ')}" if problems.any?
+
+        declared
+      end
+  end
 
   # Where the console checkout is. Tests that need a real library read it from
   # here rather than from a copy in this repository, which is what the storage
@@ -93,7 +115,7 @@ module CartridgeTestHelper
 
   # Install the real library, straight from the checkout, through the same
   # ConsoleLibraryInstall the rake task and the upload screen use.
-  def install_real_console_library(version = CONSOLE_VERSION)
+  def install_real_console_library(version = CartridgeTestHelper.real_console_version)
     ConsoleLibraryInstall.install!(real_console_entries, title: "Console #{version}")
   end
 

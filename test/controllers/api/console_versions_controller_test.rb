@@ -12,26 +12,35 @@ require "fileutils"
 # is asked in downloads_controller_test.rb -- which needs the real library,
 # where this needs an empty one.
 class Api::ConsoleVersionsControllerTest < ActionDispatch::IntegrationTest
+  # A version this site does not have, for every test here.
+  #
+  # A literal release number was the wrong way to say that: the installed console
+  # comes from a checkout that moves, so the moment the checkout shipped the
+  # version the tests were using as "not installed", `setup` installed exactly
+  # that and every release in this file was refused as already installed. Far
+  # enough above anything real that the next console release does not reach it.
+  NEW_VERSION = "9.9.9"
+
   setup { console_version! }
 
   test "an admin's key installs a new version" do
     assert_difference -> { ConsoleVersion.count }, 1 do
-      post_releases console_archive(version: "0.2.0"), as: admin
+      post_releases console_archive(version: NEW_VERSION), as: admin
     end
 
     assert_response :created
     body = response.parsed_body
 
-    assert_equal "0.2.0", body["version"]
+    assert_equal NEW_VERSION, body["version"]
     assert_equal false, body["default"], "installing must not make it the default"
     assert body["modules"].to_i > 0
-    assert ConsoleVersion.find_by!(version: "0.2.0").available?
+    assert ConsoleVersion.find_by!(version: NEW_VERSION).available?
   end
 
   # The whole reason the release script is held back from the public download.
   test "an ordinary member's key is refused" do
     assert_no_difference -> { ConsoleVersion.count } do
-      post_releases console_archive(version: "0.2.0"), as: users(:one)
+      post_releases console_archive(version: NEW_VERSION), as: users(:one)
     end
 
     assert_response :forbidden
@@ -39,21 +48,21 @@ class Api::ConsoleVersionsControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "a missing or wrong key is a 401, not a redirect" do
-    post api_console_versions_path, params: { archive: console_archive(version: "0.2.0") }
+    post api_console_versions_path, params: { archive: console_archive(version: NEW_VERSION) }
     assert_response :unauthorized
 
-    post_releases console_archive(version: "0.2.0"), key: "ds_made_up"
+    post_releases console_archive(version: NEW_VERSION), key: "ds_made_up"
     assert_response :unauthorized
   end
 
   # Installing a version a site already has would be an update, and updates are
   # refused everywhere else in this app too.
   test "a version that is already installed is refused" do
-    post_releases console_archive(version: "0.2.0"), as: admin
+    post_releases console_archive(version: NEW_VERSION), as: admin
     assert_response :created
 
     assert_no_difference -> { ConsoleVersion.count } do
-      post_releases console_archive(version: "0.2.0"), as: admin
+      post_releases console_archive(version: NEW_VERSION), as: admin
     end
 
     assert_response :unprocessable_content
@@ -61,7 +70,7 @@ class Api::ConsoleVersionsControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "an archive that is not a console is refused with the reason" do
-    post_releases console_archive(version: "0.2.0", main: "require nothing"), as: admin
+    post_releases console_archive(version: NEW_VERSION, main: "require nothing"), as: admin
 
     assert_response :unprocessable_content
     assert_predicate response.parsed_body["problems"], :present?
@@ -78,7 +87,7 @@ class Api::ConsoleVersionsControllerTest < ActionDispatch::IntegrationTest
     before_default = ConsoleVersion.default
     cartridge = ingest(space_cart, user: users(:one))
 
-    post_releases console_archive(version: "0.2.0"), as: admin
+    post_releases console_archive(version: NEW_VERSION), as: admin
 
     assert_equal before_default, ConsoleVersion.default
     assert_equal before_default, cartridge.reload.console_version
