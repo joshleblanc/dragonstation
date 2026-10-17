@@ -154,6 +154,27 @@ class ConsoleLibrary
   # otherwise.
   def filetime = console_version.created_at.to_i
 
+  # A token that changes exactly when this library's bytes change.
+  #
+  # Keyed on the blob each file's bytes live behind, because that is the only
+  # thing that identifies the bytes. The version's own created_at, which
+  # filetime above is built on, will not do: console:install fills an empty row
+  # in after the fact, which moves the files without moving the version. A blob
+  # row is immutable once written -- a change to the library is a new blob, not
+  # a rewritten one -- so the ids cannot repeat with different content behind
+  # them, and this catches a repair that a version id or a timestamp would miss.
+  #
+  # Hashed rather than kept as a list, because a version's whole file list is
+  # longer than a cache key wants to be. SHA and not #hash: String#hash is
+  # seeded per process, so the same library would key differently in every Puma
+  # worker and every restart, and the store would fill with copies that never
+  # hit again.
+  def content_token
+    @content_token ||= Digest::SHA256.hexdigest(
+      records.map { |path, file| "#{path}\0#{file.blob&.id}" }.sort.join("\n")
+    )
+  end
+
   # The version string the library itself claims to be, read from version.rb.
   #
   # Checked against the row's version on load. A library stored under a version
@@ -175,8 +196,16 @@ class ConsoleLibrary
 
   private
     # Every stored file, keyed by path.
+    #
+    # with_attached_blob, and not a plain has_many, because reading the bytes is
+    # the entire purpose of this class. A plain association loads the file rows
+    # and nothing else, so the first .blob on each one resolved the attachment
+    # row and then the blob row -- two queries per file, every time, with no
+    # memoization to catch them. Twenty library files cost forty-four queries
+    # for a single /docs request, and against a network storage service every
+    # one of those also carried a round trip.
     def records
-      @records ||= console_version.console_library_files.index_by(&:path)
+      @records ||= console_version.console_library_files.with_attached_blob.index_by(&:path)
     end
 
     # The bytes behind one path, from wherever this library is being read.

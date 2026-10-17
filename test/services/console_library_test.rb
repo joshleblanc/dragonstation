@@ -65,4 +65,31 @@ class ConsoleLibraryTest < ActiveSupport::TestCase
 
     assert_not ConsoleLibrary.new("0.1.0", entries: entries).available?
   end
+
+  # The content token is what the documentation cache is keyed on, so the only
+  # property that matters is that it moves when the bytes do and stays put when
+  # they do not.
+  test "the content token is the same for two readers of one library" do
+    assert_equal @version.library.content_token, @version.reload.library.content_token
+  end
+
+  test "the content token moves when the library's files do" do
+    before = @version.library.content_token
+
+    # restore! is the only thing that writes files behind an installed version,
+    # and it does it by replacing the rows and their blobs, which is what the
+    # token is reading.
+    ConsoleLibraryInstall.restore!(console_library_entries("0.1.0"), @version.reload)
+
+    refute_equal before, @version.library.content_token
+  end
+
+  test "a library whose blobs are gone still has a content token" do
+    # The blob is optional here on purpose: an install that cannot be read is
+    # still a state with an identity, and asking for the token is how the
+    # documentation cache keys that state rather than raising.
+    lose_the_blobs!(@version)
+
+    assert_predicate @version.library.content_token, :present?
+  end
 end

@@ -155,7 +155,7 @@ class ConsoleDocumentation
   # load-bearing to the library, so it is the order a reader should meet them
   # in too: each module mostly builds on the ones above it.
   def modules
-    @modules ||= library.require_paths.filter_map { |path| read(path) }
+    @modules ||= library.candidate? ? build_all : cached_modules
   end
 
   def slugs = modules.map(&:slug)
@@ -163,6 +163,36 @@ class ConsoleDocumentation
   def find(slug) = modules.find { |m| m.slug == slug }
 
   private
+    # Read every module the library requires, in the order it requires them.
+    def build_all
+      library.require_paths.filter_map { |path| read(path) }
+    end
+
+    # Parsing the whole library is what these pages cost. Twenty files, once
+    # through the lexer and once through the parser each, plus a blob download
+    # per file -- and against a network storage service every one of those
+    # downloads is a round trip. None of it changes while a console version
+    # stands still, so it is worth keeping.
+    #
+    # Keyed on the library's content token rather than the version's id, so
+    # console:install repairing a version in place moves the key without anyone
+    # remembering to clear a cache.
+    #
+    # CACHE_SALT is what makes changing the extraction below safe: this store
+    # is a database that outlives the deploy that wrote to it, so without a
+    # salt in the key a change to how these pages read a module would keep
+    # serving the old reading indefinitely. Bump it when the reading changes.
+    CACHE_SALT = "v1"
+
+    # Cached in the store but not forever, so that a key this code gets wrong
+    # costs one slow request rather than a permanently wrong page.
+    CACHE_TTL = 7.days
+
+    def cached_modules
+      Rails.cache.fetch("console-docs/#{CACHE_SALT}/#{library.content_token}",
+        expires_in: CACHE_TTL) { build_all }
+    end
+
     def read(path)
       source = library.read(path).dup.force_encoding(Encoding::UTF_8)
 
@@ -170,10 +200,19 @@ class ConsoleDocumentation
       # page: one that says why. These pages are public and this is vendored
       # source, so an exception here would take the whole site down over a file
       # nobody can read.
-      return unparsed(path, "is not valid Ruby") unless Ripper.sexp(source)
+      #
+      # Checked before parsing rather than after. Ripper used to be handed each
+      # file three times over -- once to prove it parsed, once to find the module
+      # names, once to find the methods -- and a file that is not text cannot be
+      # lexed at all. It also says the more useful thing about a module that
+      # ships as binary: "is not text" rather than "is not valid Ruby", which was
+      # true of it and unhelpful.
       return unparsed(path, "is not text") unless source.valid_encoding?
 
-      build(path, source)
+      sexp = Ripper.sexp(source)
+      return unparsed(path, "is not valid Ruby") unless sexp
+
+      build(path, source, sexp)
     rescue ConsoleLibrary::Missing => e
       unparsed(path, e.message)
     end
@@ -184,10 +223,21 @@ class ConsoleDocumentation
                  error: "#{path} #{reason}")
     end
 
-    def build(path, source)
-      comments = comments_by_line(source)
-      names = module_names(source)
-      header = header_comment(source, comments)
+    # The parse tree is threaded in from read rather than rebuilt here, and the
+    # lines are split once for everything below.
+    #
+    # Both were duplicated because each method wanted a source it could ask
+    # questions of on its own, and String#lines does not answer "what is line 4"
+    # without building the whole array first. Asking it 952 times -- twice per
+    # method definition, across 436 of them -- materialized 343,000 line strings
+    # to describe a 5,460 line library, and that garbage is what the 234ms of GC
+    # in a /docs request was.
+    def build(path, source, sexp)
+      lines = source.lines
+
+      comments = comments_by_line(source, lines.size)
+      names = module_names(sexp)
+      header = header_comment(lines, comments)
 
       Module.new(
         slug: File.basename(path, ".rb"),
@@ -195,8 +245,8 @@ class ConsoleDocumentation
         module_names: names,
         summary: summary_of(header),
         summary_doc: header,
-        sections: sections_of(source, comments),
-        line_count: source.lines.size
+        sections: sections_of(lines, comments, sexp),
+        line_count: lines.size
       )
     end
 
@@ -208,8 +258,7 @@ class ConsoleDocumentation
     # Classes count as well as modules. Roughly half the library is a class
     # (Console::Draw, Console::Input), and reading only `module` would leave
     # those pages claiming to define nothing at all.
-    def module_names(source)
-      sexp = Ripper.sexp(source)
+    def module_names(sexp)
       return [] unless sexp
 
       names = []
@@ -249,11 +298,11 @@ class ConsoleDocumentation
 
     # The comment block above the first `module` keyword: the file's own
     # description of itself.
-    def header_comment(source, comments)
-      line = source.lines.index { |l| l =~ /^\s*module\s/ }
+    def header_comment(lines, comments)
+      line = lines.index { |l| l =~ /^\s*module\s/ }
       return [] unless line
 
-      doc_for(source, comments, line + 1)
+      doc_for(lines, comments, line + 1)
     end
 
     def summary_of(header)
@@ -261,12 +310,12 @@ class ConsoleDocumentation
     end
 
     # Methods, in file order, grouped by the library's own dividers.
-    def sections_of(source, comments)
+    def sections_of(lines, comments, sexp)
       sections = []
       current = Section.new(title: nil, methods: [])
 
-      definitions(source).each do |definition|
-        doc, dividers = doc_and_dividers(source, comments, definition[:line])
+      definitions(lines, sexp).each do |definition|
+        doc, dividers = doc_and_dividers(lines, comments, definition[:line])
 
         dividers.each do |title|
           sections << current
@@ -287,8 +336,8 @@ class ConsoleDocumentation
 
     # Comments immediately above a line, split into the parts that document it
     # and the ones that announce the section it belongs to.
-    def doc_and_dividers(source, comments, line)
-      block = raw_comment_lines(source, comments, line)
+    def doc_and_dividers(lines, comments, line)
+      block = raw_comment_lines(lines, comments, line)
       titles = []
 
       doc = block.reject do |comment|
@@ -316,14 +365,17 @@ class ConsoleDocumentation
       [ false, nil ]
     end
 
-    def doc_for(source, comments, line) = doc_and_dividers(source, comments, line).first
+    def doc_for(lines, comments, line) = doc_and_dividers(lines, comments, line).first
 
     # Every comment line above `line`, up to the nearest code line. Blank lines
     # are walked through rather than stopping the scan: the library puts a blank
     # line between a section divider and the method it introduces, and treating
     # that as the end of the comment would lose every documented method.
-    def raw_comment_lines(source, comments, line)
-      lines = source.lines
+    #
+    # Called once per method definition with the file's lines handed in. It used
+    # to take the source and split it itself, which is how 436 methods came to
+    # ask for 343,000 lines between them.
+    def raw_comment_lines(lines, comments, line)
       out = []
 
       index = line - 2
@@ -344,8 +396,9 @@ class ConsoleDocumentation
       out
     end
 
-    def comments_by_line(source)
-      lines = Array.new(source.lines.size + 1) { [] }
+    # The line count comes from the caller, which has already split the file.
+    def comments_by_line(source, line_count)
+      lines = Array.new(line_count + 1) { [] }
 
       Ripper.lex(source).each do |(position, type, token, _state)|
         lines[position[0]] << token.chomp if type == :on_comment
@@ -355,8 +408,7 @@ class ConsoleDocumentation
     end
 
     # Definitions with their signature read straight off the source.
-    def definitions(source)
-      sexp = Ripper.sexp(source)
+    def definitions(lines, sexp)
       return [] unless sexp
 
       found = []
@@ -368,7 +420,7 @@ class ConsoleDocumentation
         name = definition_name(node)
         next unless name
 
-        found << { name: name, line: line, signature: signature_at(source, line) }
+        found << { name: name, line: line, signature: signature_at(lines, line) }
       end
 
       found.sort_by { |d| d[:line] }
@@ -397,8 +449,7 @@ class ConsoleDocumentation
     # `def draw.sprite(path:, x:, y:)` and friends. Read from the source rather
     # than rebuilt from the parse tree: what a reader needs is the line as
     # written, including its default arguments.
-    def signature_at(source, line)
-      lines = source.lines
+    def signature_at(lines, line)
       out = lines[line - 1].to_s.strip
 
       depth = out.count("(") - out.count(")")
