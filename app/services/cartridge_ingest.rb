@@ -1,57 +1,24 @@
-# rubyzip is required by SafeArchive, which is where Zip::File is actually
-# called. Including it here autoloads the module, so this file still pulls zip
-# in on its own -- there is a test that boots the app alone and checks exactly
-# that, because nothing else in a real request would have loaded it.
-
 # Turn an uploaded ZIP into a cartridge, or explain why it is not one.
 #
-# A cart is a directory with a contract: an entry file, code that defines the
-# module named after the directory, and every asset it references. A ZIP is
-# just a container and knows none of that, so this does three jobs:
-#
-#   1. refuse the archives that are dangerous rather than malformed --
-#      traversal, absolute paths, symlinks, decompression bombs;
-#   2. find the single cart inside, and refuse an archive holding several,
-#      because a cart has to be one game;
-#   3. check the cart owns every asset it names, the way publish-cart does,
-#      so a missing sprite is an upload error instead of a blank texture on
-#      someone else's page.
-#
-# The checks are deliberately as strict as publish-cart's. That script learned
-# them the hard way, on a build that shipped with an invisible sprite, and the
-# failure mode is invisible at every layer above it.
+# A cart is a directory with a contract: an entry file, a class named after the
+# directory, and every asset it references. The checks are as strict as the
+# console's publish-cart, which learned them from a build that shipped with an
+# invisible sprite: a missing asset must be an upload error, not a blank texture
+# on someone else's page.
 class CartridgeIngest
-  # The traversal, symlink and expansion refusals live in SafeArchive, because
-  # a console library install takes an archive from a browser too and needs
-  # exactly the same four guards. Inheriting from its Rejected keeps
-  # `rescue CartridgeIngest::Invalid` working for the controller, and keeps
-  # `problems` available for the form to render.
+  include SafeArchive
+
   class Invalid < SafeArchive::Rejected; end
 
-  # A cart's own directories. publish-cart greps the source for quoted paths
-  # under these roots and refuses to package when one does not resolve inside
-  # the cart.
-  ASSET_ROOTS = %w[sprites sounds maps data].freeze
-
-  # The same grep publish-cart does, kept deliberately narrow: it wants literal
-  # asset paths, not every string in the file. The whole path is captured, not
-  # just the directory root -- publish-cart checks each reference individually,
-  # so capturing only the root would silently accept every missing asset.
+  # The same grep publish-cart does: literal paths under a cart's own asset
+  # directories. The whole path is captured so each reference is checked.
   ASSET_REFERENCE = %r{['"]((?:sprites|sounds|maps|data)/[\w./-]+)['"]}
 
-  # Directories whose presence means a cart is not self-contained. DragonRuby
-  # resolves paths against the game root and refuses to stat outside it, so a
-  # cart reaching for ../ is broken in a way no upload-time check can fix.
-  MAX_FILES = SafeArchive::MAX_FILES
-  MAX_TOTAL_BYTES = SafeArchive::MAX_TOTAL_BYTES
-  MAX_COMPRESSION_RATIO = SafeArchive::MAX_COMPRESSION_RATIO
-
-  # The console's own diagnostic cart names paths that deliberately do not
-  # resolve, because it is the thing testing resolution. publish-cart exempts
-  # it by name, and so does this.
+  # The console's self-test cart names unresolvable paths on purpose;
+  # publish-cart exempts it by name, and so does this.
   DIAGNOSTIC_CART_NAMES = %w[selftest].freeze
 
-  include SafeArchive
+  CONSTANT_NAME = /\A[a-zA-Z][a-zA-Z0-9_]*\z/
 
   attr_reader :archive, :user, :console_version, :title
 
@@ -63,193 +30,90 @@ class CartridgeIngest
   end
 
   def call
-    entries = read_entries
-    cart = locate_cart(entries)
+    directory, files = unwrap(read_entries)
 
-    problems = []
-    problems.concat(validate_entry(cart))
-    problems.concat(validate_assets(cart)) unless DIAGNOSTIC_CART_NAMES.include?(cart[:name])
+    entry_path = entry_path_for(files, directory)
+    raise Invalid, "#{directory || 'cart'} has no entry file. Expected app/main.rb, or app/<cart name>.rb." unless entry_path
+
+    # With no wrapping directory the cart's name comes from its entry file,
+    # verbatim: Console::CartLoader tries the name and then its camelised form.
+    name = directory || File.basename(entry_path, ".rb")
+    unless name.match?(CONSTANT_NAME)
+      raise Invalid, "'#{name}' is not a usable cart name. The console looks the cart's class " \
+                     "up by directory name, so it has to be a Ruby constant."
+    end
+
+    problems = DIAGNOSTIC_CART_NAMES.include?(name) ? [] : asset_problems(name, files)
     raise Invalid, problems if problems.any?
 
-    build(cart, cart[:entries])
+    build(name, entry_path, files)
   end
 
   private
     def archive_subject = "cart"
 
-    # Find the one cart directory, whether the archive wraps it or *is* it.
-    #
-    # Everything downstream works in cart-relative paths ('app/main.rb'), so
-    # the wrapping directory is stripped here, once, rather than being carried
-    # through validation and storage as a prefix that each step would have to
-    # remember to strip.
-    def locate_cart(entries)
-      candidates = entries.keys.map { |p| p.split("/").first }.uniq
-        .select { |top| entries.keys.any? { |p| p.start_with?("#{top}/app/") } }
+    # Same order as the loader and publish-cart.
+    def entry_path_for(files, directory)
+      return "app/main.rb" if files.key?("app/main.rb")
+      return "app/#{directory}.rb" if directory && files.key?("app/#{directory}.rb")
 
-      if candidates.size > 1
-        raise Invalid, "archive contains more than one cart: #{candidates.sort.join(', ')}"
-      end
-
-      if candidates.size == 1
-        top = candidates.first
-        return { name: top, prefix: "#{top}/", entries: strip_prefix(entries, "#{top}/") }
-      end
-
-      # The archive is the cart itself: app/main.rb at the root. The cart's
-      # name is then the constant its entry file defines, and Console::CartLoader
-      # looks it up by directory name, so it is taken from the file.
-      if entries.keys.any? { |p| p.start_with?("app/") }
-        return { name: nil, prefix: "", entries: entries }
-      end
-
-      raise Invalid,
-        "no cart found. Expected a directory containing app/main.rb, or an archive of one cart's files."
+      top_level = files.keys.grep(%r{\Aapp/[^/]+\.rb\z})
+      top_level.first if top_level.one?
     end
 
-    # Only what is inside the cart directory, with the directory stripped.
-    #
-    # A zip of a project folder routinely carries a README or a .gitignore
-    # beside the cart. Those are packaging noise: storing them would put files
-    # inside the served cart that the game never asked for.
-    def strip_prefix(entries, prefix)
-      entries
-        .select { |path, _| path.start_with?(prefix) }
-        .to_h { |path, bytes| [ path.delete_prefix(prefix), bytes ] }
-    end
-
-    # The entry file, and the cart's name from it.
-    #
-    # Order matches the loader and publish-cart: app/main.rb first, then
-    # app/<name>.rb.
-    def validate_entry(cart)
-      files = cart[:entries]
-      stem = cart[:name]
-
-      entry_path =
-        if files.key?("app/main.rb")
-          "app/main.rb"
-        elsif stem && files.key?("app/#{stem}.rb")
-          "app/#{stem}.rb"
-        elsif files.keys.grep(%r{\Aapp/[^/]+\.rb\z}).one?
-          files.keys.grep(%r{\Aapp/[^/]+\.rb\z}).first
-        end
-
-      if entry_path.nil?
-        return [ "#{cart[:name] || 'cart'} has no entry file. " \
-                "Expected app/main.rb, or app/<cart name>.rb." ]
-      end
-
-      name = stem || constant_from(entry_path)
-      if name.blank?
-        return [ "#{cart[:name] || 'cart'}: could not work out the cart name from #{entry_path}" ]
-      end
-
-      unless name.match?(/\A[a-zA-Z][a-zA-Z0-9_]*\z/)
-        return [ "'#{name}' is not a usable cart name. The console looks the cart's class " \
-                 "up by directory name, so it has to be a Ruby constant." ]
-      end
-
-      cart[:name] = name
-      cart[:entry_path] = entry_path
-      []
-    end
-
-    # The cart's name when the archive is the cart itself, with no directory
-    # to take it from.
-    #
-    # Verbatim from the entry filename, not camelised: Console::CartLoader
-    # resolves a cart's class by trying the directory name and then its
-    # camelised form, so a cart stored as 'space' finds 'Space' exactly the
-    # way the console's own carts/space does. Deriving the constant here
-    # instead would store 'Space' and rely on a different branch to match.
-    def constant_from(entry_path)
-      File.basename(entry_path, ".rb")
-    end
-
-    # Every asset the cart's own source names has to be inside the cart.
-    #
-    # Not a nicety: the served tree contains the cart and nothing else, so a
-    # reference that resolves against console-root starter art in a checkout
-    # is a file that simply does not exist here. It would load as an invisible
-    # sprite and nothing would say so.
-    def validate_assets(cart)
-      files = cart[:entries]
-
-      referenced = files.each_value.with_object(Set.new) do |bytes, set|
-        next if binary?(bytes)
-        bytes.scan(ASSET_REFERENCE) { |match| set << match.first }
-      end
-
-      missing = referenced.reject { |ref| files.key?(ref) }.sort
+    # The served tree holds the cart and nothing else, so an asset outside it
+    # would load as an invisible sprite with no error anywhere.
+    def asset_problems(name, files)
+      missing = files.each_value.with_object(Set.new) { |bytes, refs|
+        # A NUL byte marks a binary asset; no source file has one.
+        bytes.scan(ASSET_REFERENCE) { |(ref)| refs << ref } unless bytes.include?("\x00")
+      }.reject { |ref| files.key?(ref) }.sort
 
       return [] if missing.empty?
 
-      [ "#{cart[:name]} uses assets it does not own:\n" +
+      [ "#{name} uses assets it does not own:\n" +
         missing.map { |m| "  #{m}\n  move it into the cart directory, or it will not be there" }.join("\n") ]
     end
 
-    # Skip anything with a NUL byte, which is what every real binary asset has
-    # and no .rb file has.
-    def binary?(bytes)
-      bytes.include?("\x00")
-    end
-
-    def build(cart, entries)
-      cartridge = nil
-
+    def build(name, entry_path, files)
       Cartridge.transaction do
         cartridge = Cartridge.create!(
           user: user,
           console_version: console_version,
-          title: title.presence || console_title(cart) || cart[:name].humanize,
-          slug: unique_slug(cart[:name]),
-          cart_name: cart[:name],
-          entry_path: cart[:entry_path]
+          title: title.presence || declared_title(files[entry_path]) || name.humanize,
+          slug: unique_slug(name),
+          cart_name: name,
+          entry_path: entry_path
         )
 
-        # One filetime for the whole upload. It moves when the cartridge is
-        # replaced and never in between, which is what the loader's IndexedDB
-        # cache needs: a value that shifted on every request would force a
-        # re-download every time without ever telling it anything true.
+        # One filetime per upload: the loader's IndexedDB cache re-downloads
+        # when it moves, so it must move on replacement and never in between.
         filetime = Time.current.to_i
 
-        entries.each do |relative, bytes|
-          file = cartridge.cartridge_files.create!(
-            path: relative,
-            byte_size: bytes.bytesize,
-            filetime: filetime
-          )
+        files.each do |path, bytes|
+          file = cartridge.cartridge_files.create!(path: path, byte_size: bytes.bytesize, filetime: filetime)
           file.blob.attach(
-            io: StringIO.new(bytes.dup.force_encoding(Encoding::BINARY)),
-            filename: File.basename(relative),
-            content_type: Marcel::MimeType.for(StringIO.new(bytes), name: relative)
+            io: StringIO.new(bytes.b),
+            filename: File.basename(path),
+            content_type: Marcel::MimeType.for(StringIO.new(bytes), name: path)
           )
         end
-      end
 
-      cartridge
+        cartridge
+      end
     end
 
-    # TITLE, when the cart states one. The same trick --list and publish-cart
-    # use, so the listing and the upload can never disagree about a name.
-    def console_title(cart)
-      bytes = cart[:entries][cart[:entry_path]]
-      return nil if bytes.nil?
-
-      bytes[/^TITLE\s*=\s*['"]([^'"]*)['"]\s*$/, 1]
+    # TITLE = '...' in the entry file, as --list and publish-cart read it.
+    def declared_title(source)
+      source&.[](/^TITLE\s*=\s*['"]([^'"]*)['"]\s*$/, 1)
     end
 
     def unique_slug(seed)
-      base = seed.to_s.downcase.gsub(/[^a-z0-9]+/, "-").gsub(/\A-+|-+\z/, "")
-      base = "cart" if base.blank?
+      base = seed.downcase.gsub(/[^a-z0-9]+/, "-").gsub(/\A-+|-+\z/, "").presence || "cart"
 
       slug = base
       n = 1
-      while Cartridge.exists?(slug: slug)
-        n += 1
-        slug = "#{base}-#{n}"
-      end
+      slug = "#{base}-#{n += 1}" while Cartridge.exists?(slug: slug)
       slug
     end
 end

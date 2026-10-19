@@ -41,8 +41,8 @@
     <p><strong><%= pluralize(@unusable.size, "version") %> cannot be served.</strong></p>
     <p>
       <%= @unusable.map(&:version).to_sentence %>
-      <%= "has" %> no stored library files. Every cartridge pinned to
-      <%= "it" %> will fail to boot. See
+      <%= @unusable.one? ? "has" : "have" %> no stored library files. Every cartridge pinned to
+      <%= @unusable.one? ? "it" : "them" %> will fail to boot. See
       <%= link_to "the console library", admin_console_versions_path %>.
     </p>
   </div>

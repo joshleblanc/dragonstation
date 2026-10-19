@@ -1,36 +1,21 @@
-# rubyzip is a transitive dependency of activestorage, and Bundler.require only
-# requires the gems named in the Gemfile -- not their dependencies. ActiveStorage
-# requires zip lazily, deep inside archive analysis, which is a different code
-# path from this one. So nothing else loads it: without this line, Zip is
-# defined in the test process (the test helper requires it) and undefined
-# everywhere else, which is a 500 on the first real upload and a green suite.
+# rubyzip is a transitive dependency of activestorage, which only requires it
+# lazily. Without this line Zip is defined in tests (the helpers require it)
+# and undefined in production -- a 500 on the first real upload.
 require "zip"
 
 # Reading an uploaded ZIP without letting it name anything outside the
-# directory it is meant to land in.
+# directory it lands in. Both upload paths -- carts and console libraries --
+# go through here, so the traversal guard exists exactly once:
 #
-# Two things on this site take a ZIP from a browser and turn it into files on
-# disk -- a cart upload and a console library install -- and both are protected
-# by the same four rules:
+#   * no absolute paths, '..' segments, backslash spellings, or NUL bytes;
+#   * no symlinks;
+#   * a ceiling on file count, expanded size and compression ratio.
 #
-#   * no absolute paths, no '..' segments, no backslash spellings of them, and
-#     no NUL bytes, because a path that names somewhere else is not a path that
-#     is being unpacked;
-#   * no symlinks, for the same reason: a link is a name that points out of the
-#     directory it was written into;
-#   * a hard ceiling on file count, total expanded bytes and compression ratio,
-#     so a small archive cannot fill the disk or the process's memory.
+# rubyzip never *writes* a symlink entry, so these refusals are reachable only
+# by archives from other tools -- which is exactly why they must hold alone.
 #
-# They live here rather than in whichever service needed them first because a
-# traversal guard written twice is a traversal guard that will eventually exist
-# once. rubyzip 3.7 always writes ftype :file even when the symlink bit is set,
-# so a hostile archive cannot be *built* through it -- these refusals are
-# reachable only by archives from other tools, which is exactly why they have to
-# hold on their own.
-#
-# An includer supplies two things: a reader called `archive`, and (optionally)
-# an `Invalid` error class for refusals, so each service keeps the exception
-# type it documents and its callers already rescue.
+# Includers supply `archive` (an IO), an `Invalid < SafeArchive::Rejected`
+# class, and `archive_subject` for messages ("cart", "console library").
 module SafeArchive
   class Rejected < StandardError
     attr_reader :problems
@@ -41,40 +26,20 @@ module SafeArchive
     end
   end
 
-  # A file count ceiling well above a real library or cart, and well below the
-  # number at which "this is a bomb" stops being a guess.
   MAX_FILES = 512
-
   MAX_TOTAL_BYTES = 32 * 1024 * 1024
-
-  # A .rb full of comments compresses far past this, so the ratio has to leave
-  # room for text before it means anything.
+  # A .rb full of comments compresses a long way, so this leaves room for text.
   MAX_COMPRESSION_RATIO = 200
 
   private
-    # What the archive is a container *of*, for error messages. Overridden by
-    # each includer so "escapes the cart" does not end up on a library.
-    def archive_subject = "archive"
-
-    # The error class refusals raise. Resolved per instance rather than lexically
-    # so an includer's own Invalid is used, not this module's.
-    def archive_rejection_class
-      if self.class.const_defined?(:Invalid, false)
-        self.class.const_get(:Invalid, false)
-      else
-        Rejected
-      end
-    end
-
     def reject!(message)
-      raise archive_rejection_class, message
+      raise self.class::Invalid, message
     end
 
-    # Every file in the archive as relative path => bytes, with the refusal
-    # rules already applied. Directory entries are skipped: an archive of a
-    # directory tree carries them, and the files are what get written.
+    # Every file in the archive as relative path => bytes, refusals applied.
     def read_entries
       entries = {}
+      total = 0
 
       with_zip do |zip|
         zip.each do |entry|
@@ -83,64 +48,70 @@ module SafeArchive
           path = safe_path(entry.name)
           reject!("archive contains a symbolic link: #{entry.name}") if symlink?(entry)
 
-          bytes = entry.get_input_stream { |io| io.read }
-
-          check_budget!(entries, path, entry, bytes)
+          bytes = entry.get_input_stream(&:read)
+          total += bytes.bytesize
+          check_budget!(entries.size, path, entry, bytes, total)
           entries[path] = bytes
         end
       end
 
       reject!("archive is empty") if entries.empty?
-
       entries
     end
 
-    # The archive reader, behind a method so a test can supply an entry rubyzip
-    # will not produce. Takes no arguments: it reads the includer's `archive`,
-    # which is what lets a test replace the whole reader with a stub.
+    # Behind a method so a test can supply an entry rubyzip will not produce.
     def with_zip(&block)
       Zip::File.open_buffer(StringIO.new(archive.read), &block)
     rescue Zip::Error => e
       reject!("could not read the archive: #{e.message}")
     end
 
-    # The one path rule that matters for an archive: nothing may escape the
-    # directory it was extracted into. Absolute paths, '..' segments and
-    # backslashes are all the same attack wearing different clothes.
     def safe_path(name)
       reject!("archive contains an absolute path: #{name}") if name.start_with?("/", "\\")
+      reject!("archive contains a null byte in a path") if name.include?("\0")
 
-      normalised = name.tr("\\", "/")
-      segments = normalised.split("/").reject { |s| s.empty? || s == "." }
-
-      if segments.any? { |s| s == ".." }
-        reject!("archive contains a path that escapes the #{archive_subject}: #{name}")
-      end
-
-      reject!("archive contains a null byte in a path") if normalised =~ /\0/
+      segments = name.tr("\\", "/").split("/").reject { |s| s.empty? || s == "." }
+      reject!("archive contains a path that escapes the #{archive_subject}: #{name}") if segments.include?("..")
 
       segments.join("/")
     end
 
     def symlink?(entry)
       entry.respond_to?(:symlink?) ? entry.symlink? : entry.ftype == :symlink
-    rescue NoMethodError
-      false
     end
 
-    # The bomb checks, applied per file as it is read so the budget covers the
-    # archive rather than only what survives it.
-    def check_budget!(entries, path, entry, bytes)
-      if entries.size >= MAX_FILES
-        reject!("archive has more than #{MAX_FILES} files")
-      end
+    def check_budget!(count, path, entry, bytes, total)
+      reject!("archive has more than #{MAX_FILES} files") if count >= MAX_FILES
 
       compressed = entry.compressed_size.to_i
       if compressed.positive? && bytes.bytesize / compressed > MAX_COMPRESSION_RATIO
         reject!("#{path} expands #{MAX_COMPRESSION_RATIO}x beyond its compressed size")
       end
 
-      total = entries.values.sum(&:bytesize) + bytes.bytesize
       reject!("archive expands beyond #{MAX_TOTAL_BYTES / 1024 / 1024}MB") if total > MAX_TOTAL_BYTES
+    end
+
+    # [directory name or nil, entries relative to it].
+    #
+    # Zipping a folder and zipping its contents are both normal, so the archive
+    # may wrap the tree in one directory or be the tree. Anything beside that
+    # directory (a README, a .gitignore) is packaging noise and is dropped.
+    def unwrap(entries)
+      wrapped = entries.keys.map { |path| path.split("/").first }.uniq
+        .select { |top| entries.keys.any? { |path| path.start_with?("#{top}/app/") } }
+
+      if wrapped.size > 1
+        reject!("archive contains more than one #{archive_subject}: #{wrapped.sort.join(', ')}")
+      end
+
+      if (top = wrapped.first)
+        prefix = "#{top}/"
+        return [ top, entries.filter_map { |path, bytes| [ path.delete_prefix(prefix), bytes ] if path.start_with?(prefix) }.to_h ]
+      end
+
+      return [ nil, entries ] if entries.keys.any? { |path| path.start_with?("app/") }
+
+      reject!("no #{archive_subject} found. Expected a directory containing app/main.rb, " \
+              "or an archive of one #{archive_subject}'s files.")
     end
 end

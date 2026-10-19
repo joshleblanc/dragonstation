@@ -42,9 +42,8 @@ class DocsController < ApplicationController
 
     return head :not_found unless @module
 
-    @source = @documentation.library.read(@module.path)
-    @highlighted = FileHighlighter.new(@module.path, @source.force_encoding(Encoding::UTF_8)).call
-  rescue ConsoleLibrary::Missing => e
+    @highlighted = FileHighlighter.new(@module.path, @documentation.library.read(@module.path).dup.force_encoding(Encoding::UTF_8)).call
+  rescue ConsoleLibrary::Missing
     head :not_found
   end
 

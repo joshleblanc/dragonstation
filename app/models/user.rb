@@ -20,17 +20,13 @@ class User < ApplicationRecord
     },
     length: { in: 3..32 }
 
-# has_secure_password already validates that a password was supplied and that
-# the confirmation matched -- adding another :confirmation here would report
-# the same problem twice. All this adds is the length floor, which is the one
-# rule a public sign-up wants that a password reset should not be able to
-# route around.
-validates :password, length: { minimum: 8 }, allow_blank: true
+  # has_secure_password already checks presence and confirmation; this adds
+  # the length floor, which a password reset must not be able to bypass.
+  validates :password, length: { minimum: 8 }, allow_blank: true
 
-  # The publishing credential, issued now if this user does not have one.
-  # Returns the secret, which is the only time it exists.
+  # A fresh key replacing any old one. Returns the secret, its only appearance.
   def issue_api_key!
-    ApiKey.rotate!(self).last
+    ApiKey.issue!(self).last
   end
 
   # The first account to register is the operator. A fresh install has no other

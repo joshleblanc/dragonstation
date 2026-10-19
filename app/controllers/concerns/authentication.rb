@@ -49,16 +49,4 @@ module Authentication
       Current.session.destroy
       cookies.delete("session_id")
     end
-
-    # Who is asking, without redirecting anyone.
-    #
-    # require_authentication is also what populates Current.session from the
-    # cookie, so an action listed in allow_unauthenticated_access never gets it.
-    # That is right for an action that genuinely does not care who is calling --
-    # and wrong for a public action that still has to tell the owner from a
-    # stranger, where forgetting it quietly turns "your own draft" into a 404.
-    def current_user_if_signed_in
-      resume_session
-      Current.user
-    end
 end

@@ -72,17 +72,6 @@ class ApiKeyTest < ActiveSupport::TestCase
     assert_equal 1, ApiKey.where(user: @user).count
   end
 
-  test "rotating keeps the same account and returns the new secret" do
-    _, old_secret = ApiKey.issue!(@user)
-
-    key, new_secret = ApiKey.rotate!(@user)
-
-    assert_equal @user, key.user
-    assert_not_equal old_secret, new_secret
-    assert_nil ApiKey.authenticate(old_secret)
-    assert ApiKey.authenticate(new_secret).present?
-  end
-
   test "the prefix identifies a key without being one" do
     key, secret = ApiKey.issue!(@user)
 

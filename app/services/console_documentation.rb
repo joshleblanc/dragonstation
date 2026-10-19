@@ -1,109 +1,70 @@
-# The console library's documentation, read out of the library itself.
-#
-# A cart author needs to know what the library offers, and the honest answer is
-# already written down: every module carries a header explaining what it is for,
-# and nearly every method carries a comment saying what it does and why. Those
-# comments are maintained alongside the code, by whoever changed it last. A
-# hand-written copy of the same thing would be a second source of truth that is
-# wrong within a release -- and the failure would be silent, because stale docs
-# still read as docs.
-#
-# So this reads the comments instead of writing them. Ripper gives the structure
-# (which module, which method, where) and the lexer gives the comments, which
-# Ruby does not keep in the parse tree. Nothing is evaluated: the library cannot
-# run here -- it needs DragonRuby's DR and $args -- and docs must not depend on
-# being able to run the thing being documented.
-#
-# A file that will not parse yields a page with an explanation rather than an
-# exception. These pages are public and vendored source is data, not something
-# this class gets to be precious about.
-#
-# Ripper is stdlib but not preloaded, and nothing else in a request would load
-# it -- so it is required here rather than discovered missing in production.
+# Ripper is stdlib but not preloaded, and nothing else in a request loads it.
 require "ripper"
 
+# The console library's documentation, read out of the library's own comments.
+#
+# Every module has a header and nearly every method a comment, maintained with
+# the code; a hand-written copy would be wrong within a release, silently.
+# Ripper gives the structure and the lexer gives the comments. Nothing is
+# evaluated -- the library needs DragonRuby to run -- and a file that will not
+# parse gets a page saying so rather than an exception on a public page.
 class ConsoleDocumentation
-  # One method, with the comment written above it.
   Method = Struct.new(:name, :signature, :doc, :line, keyword_init: true) do
-    # True when the method says anything. A fair number are one-liners whose
-    # name is the documentation, and rendering an empty paragraph for each of
-    # them buries the ones that are not.
     def documented? = doc.present?
   end
 
-  # The `# --- heading ---` dividers the library uses to group its own methods.
-  Section = Struct.new(:title, :methods, keyword_init: true) do
-    def documented_methods = methods.select(&:documented?)
-  end
+  # A group of methods under one of the library's `# --- heading ---` dividers.
+  Section = Struct.new(:title, :methods, keyword_init: true)
 
-  # One library file: the module(s) it defines, and everything in them.
   Module = Struct.new(:slug, :path, :module_names, :summary, :summary_doc, :sections,
                       :line_count, :error, keyword_init: true) do
-    # Everything the file defines under the Console namespace.
     def named_modules = module_names.reject { |n| n == "Console" }
 
-    # What to call this page. The library's own naming does not match its file
-    # names (animation.rb defines Console::Anim), so the module wins where
-    # there is one and the file name is the fallback.
+    # File names do not match module names (animation.rb defines Console::Anim).
     def name = named_modules.first || slug
-
-    def documented_methods = sections.flat_map(&:documented_methods)
   end
 
-  # The library groups its own methods with dashed rules, and it writes them two
-  # ways: `# --- indexing ---` and `# 8-bit helpers ---`. Both are dividers; a
-  # rule that opens and closes is only decorative, so the title is whatever sits
-  # between the dashes.
-  CLOSED_DIVIDER = /\A#\s*-{3,}\s*(.*?)\s*-{3,}\s*\z/
-  OPEN_DIVIDER = /\A#\s*-{3,}\s*(.*?)\s*\z/
-  TRAILING_DIVIDER = /\A#\s*(.*?)\s*-{4,}\s*\z/
-
-  # A comment block stops at the first line that is neither a comment nor blank;
-  # a blank line inside a block is a `#` line, so it is part of the paragraph
-  # break rather than the end of the comment.
-  # One run of a doc comment: prose, or a usage sample.
-  #
-  # The library writes samples as an indented run of comment lines inside an
-  # otherwise plain-text comment -- see the header of draw.rb -- so the
-  # indentation is the markup, and a renderer that treated every comment as
-  # prose would run `draw.within(panel_rect) do` into the paragraph above it.
+  # Prose, or a usage sample: the library marks samples by indenting them.
   Block = Struct.new(:type, :text, keyword_init: true) do
     def code? = type == :code
   end
 
-  # Indented at least this far, after the `# ` has been stripped.
+  # Dividers are written `# --- title ---`, `# --- title` and `# title ----`.
+  DIVIDERS = [
+    /\A#\s*-{3,}\s*(.*?)\s*-{3,}\s*\z/,
+    /\A#\s*-{3,}\s*(.*?)\s*\z/,
+    /\A#\s*(.*?)\s*-{4,}\s*\z/
+  ].freeze
+
   CODE_INDENT = 2
 
-  # A blank comment line separates blocks. It does not have to *be* a blank
-  # line: the library writes a continued paragraph with a trailing `\` to show
-  # it is one, and splitting there would cut a sentence in half.
+  # A trailing `\` continues a paragraph across a blank comment line.
   CONTINUED = /\\\s*\z/
 
-  # A comment split into prose and code runs.
-  #
-  # A block is code only if *every* line is indented: one unindented line in the
-  # middle of an example is how a comment continues talking about it, and that
-  # line is prose.
+  # Bump when the extraction changes: the cache outlives deploys.
+  CACHE_SALT = "v1"
+  CACHE_TTL = 7.days
+
+  # A comment split into prose and code blocks. A block is code only if every
+  # line is indented; one unindented line means the comment is talking again.
   def self.blocks(lines)
     groups = []
 
     lines.join("\n").split(/\n{2,}/).each do |chunk|
       rows = chunk.split("\n")
 
-      # A trailing `\` says the paragraph continues, so the next chunk belongs
-      # to this one rather than starting a new block.
-      if groups.last && groups.last.last.match?(CONTINUED)
+      if groups.last&.last&.match?(CONTINUED)
         groups.last.concat(rows)
       else
         groups << rows
       end
     end
 
-    groups.filter_map { |chunk| block(chunk) }
+    groups.filter_map { |rows| block(rows) }
   end
 
   def self.block(rows)
-    rows = Array(rows).flatten.reject { |l| l.to_s.strip.empty? }
+    rows = rows.reject { |l| l.strip.empty? }
     return nil if rows.empty?
 
     if rows.all? { |l| l[/\A\s*/].size >= CODE_INDENT }
@@ -112,14 +73,12 @@ class ConsoleDocumentation
       Block.new(type: :text, text: paragraph(rows))
     end
   end
+  private_class_method :block
 
-  # Prose is reflowed into one line: a comment is hard-wrapped, and keeping
-  # those wraps would make every paragraph carry its own indentation into the
-  # page. A trailing `\` says the sentence continues, so that line joins the
-  # next rather than becoming a break.
+  # Hard-wrapped comment lines reflowed into one; a trailing `\` is a break.
   def self.paragraph(rows)
     rows.each_with_object([]) do |line, sentences|
-      piece = line.to_s.strip
+      piece = line.strip
       continued = piece.match?(CONTINUED)
       piece = piece.sub(CONTINUED, "").rstrip
 
@@ -133,13 +92,11 @@ class ConsoleDocumentation
       sentences << +"" if continued
     end.reject(&:empty?).join(" ")
   end
-  private_class_method :block
 
   attr_reader :library
 
-  # Takes a ConsoleVersion, or a ConsoleLibrary for a library that is not stored
-  # -- which is how the tests read a module that would not parse, since such a
-  # module can never be installed.
+  # A ConsoleVersion, or a ConsoleLibrary that is not stored (tests use this
+  # for modules that could never be installed).
   def initialize(console_version_or_library)
     @library =
       if console_version_or_library.is_a?(ConsoleLibrary)
@@ -151,9 +108,7 @@ class ConsoleDocumentation
 
   def console_version = library.console_version
 
-  # Every module, in the order app/main.rb requires them. That order is
-  # load-bearing to the library, so it is the order a reader should meet them
-  # in too: each module mostly builds on the ones above it.
+  # In require order, which is the order each module builds on the last.
   def modules
     @modules ||= library.candidate? ? build_all : cached_modules
   end
@@ -163,50 +118,16 @@ class ConsoleDocumentation
   def find(slug) = modules.find { |m| m.slug == slug }
 
   private
-    # Read every module the library requires, in the order it requires them.
-    def build_all
-      library.require_paths.filter_map { |path| read(path) }
-    end
+    def build_all = library.require_paths.filter_map { |path| read(path) }
 
-    # Parsing the whole library is what these pages cost. Twenty files, once
-    # through the lexer and once through the parser each, plus a blob download
-    # per file -- and against a network storage service every one of those
-    # downloads is a round trip. None of it changes while a console version
-    # stands still, so it is worth keeping.
-    #
-    # Keyed on the library's content token rather than the version's id, so
-    # console:install repairing a version in place moves the key without anyone
-    # remembering to clear a cache.
-    #
-    # CACHE_SALT is what makes changing the extraction below safe: this store
-    # is a database that outlives the deploy that wrote to it, so without a
-    # salt in the key a change to how these pages read a module would keep
-    # serving the old reading indefinitely. Bump it when the reading changes.
-    CACHE_SALT = "v1"
-
-    # Cached in the store but not forever, so that a key this code gets wrong
-    # costs one slow request rather than a permanently wrong page.
-    CACHE_TTL = 7.days
-
+    # Parsing ~20 files plus a blob download each is what these pages cost.
+    # Keyed on content_token, so a version repaired in place re-keys itself.
     def cached_modules
-      Rails.cache.fetch("console-docs/#{CACHE_SALT}/#{library.content_token}",
-        expires_in: CACHE_TTL) { build_all }
+      Rails.cache.fetch("console-docs/#{CACHE_SALT}/#{library.content_token}", expires_in: CACHE_TTL) { build_all }
     end
 
     def read(path)
       source = library.read(path).dup.force_encoding(Encoding::UTF_8)
-
-      # A file that will not parse, or that is not text at all, still gets a
-      # page: one that says why. These pages are public and this is vendored
-      # source, so an exception here would take the whole site down over a file
-      # nobody can read.
-      #
-      # Checked before parsing rather than after. Ripper used to be handed each
-      # file three times over -- once to prove it parsed, once to find the module
-      # names, once to find the methods -- and a file that is not text cannot be
-      # lexed at all. It also says the more useful thing about a module that
-      # ships as binary: "is not text" rather than "is not valid Ruby", which was
-      # true of it and unhelpful.
       return unparsed(path, "is not text") unless source.valid_encoding?
 
       sexp = Ripper.sexp(source)
@@ -223,44 +144,26 @@ class ConsoleDocumentation
                  error: "#{path} #{reason}")
     end
 
-    # The parse tree is threaded in from read rather than rebuilt here, and the
-    # lines are split once for everything below.
-    #
-    # Both were duplicated because each method wanted a source it could ask
-    # questions of on its own, and String#lines does not answer "what is line 4"
-    # without building the whole array first. Asking it 952 times -- twice per
-    # method definition, across 436 of them -- materialized 343,000 line strings
-    # to describe a 5,460 line library, and that garbage is what the 234ms of GC
-    # in a /docs request was.
+    # Lines are split once and handed down: splitting per method once cost
+    # 343,000 strings and most of a request's GC.
     def build(path, source, sexp)
       lines = source.lines
-
       comments = comments_by_line(source, lines.size)
-      names = module_names(sexp)
       header = header_comment(lines, comments)
 
       Module.new(
         slug: File.basename(path, ".rb"),
         path: path,
-        module_names: names,
-        summary: summary_of(header),
+        module_names: module_names(sexp),
+        summary: header.map { |l| l.sub(/\A#\s?/, "").strip }.find(&:present?),
         summary_doc: header,
         sections: sections_of(lines, comments, sexp),
         line_count: lines.size
       )
     end
 
-    # Module paths, from the parse tree rather than the file name: the library
-    # does not always agree with itself here -- animation.rb defines
-    # Console::Anim, ui.rb defines Console::UI -- and a page titled with a name
-    # that does not exist in the code is worse than no page.
-    #
-    # Classes count as well as modules. Roughly half the library is a class
-    # (Console::Draw, Console::Input), and reading only `module` would leave
-    # those pages claiming to define nothing at all.
+    # From the parse tree, classes included: about half the library is classes.
     def module_names(sexp)
-      return [] unless sexp
-
       names = []
       collect_names(sexp, [], names)
       names.uniq
@@ -269,13 +172,8 @@ class ConsoleDocumentation
     def collect_names(node, prefix, names)
       return unless node.is_a?(Array)
 
-      case node[0]
-      when :module, :class
-        # `class << self` is an :sclass node, not a :class, so singleton
-        # classes never reach here as a definition of their own.
-        own = const_path(node[1])
-        return if own.blank?
-
+      # `class << self` is :sclass, so singleton classes never land here.
+      if %i[module class].include?(node[0]) && (own = const_path(node[1])).present?
         path = prefix + [ own ]
         names << path.join("::")
         node.each { |child| collect_names(child, path, names) }
@@ -289,27 +187,18 @@ class ConsoleDocumentation
       when :@const, :@ident then node[1].to_s
       when :var_ref, :top_const_ref, :const_ref then const_path(node[1])
       when :colon2
-        left = const_path(node[1])
         right = node[2].is_a?(Array) ? const_path(node[2]) : node[2].to_s
-        [ left, right ].compact.join("::")
+        [ const_path(node[1]), right ].compact.join("::")
       else node[1].to_s
       end
     end
 
-    # The comment block above the first `module` keyword: the file's own
-    # description of itself.
+    # The comment above the first `module`: the file's description of itself.
     def header_comment(lines, comments)
       line = lines.index { |l| l =~ /^\s*module\s/ }
-      return [] unless line
-
-      doc_for(lines, comments, line + 1)
+      line ? doc_and_dividers(lines, comments, line + 1).first : []
     end
 
-    def summary_of(header)
-      header.map { |l| l.sub(/\A#\s?/, "").strip }.find(&:present?)
-    end
-
-    # Methods, in file order, grouped by the library's own dividers.
     def sections_of(lines, comments, sexp)
       sections = []
       current = Section.new(title: nil, methods: [])
@@ -322,81 +211,45 @@ class ConsoleDocumentation
           current = Section.new(title: title, methods: [])
         end
 
-        current.methods << Method.new(
-          name: definition[:name],
-          signature: definition[:signature],
-          doc: doc,
-          line: definition[:line]
-        )
+        current.methods << Method.new(doc: doc, **definition)
       end
 
       sections << current
       sections.reject { |s| s.methods.empty? }
     end
 
-    # Comments immediately above a line, split into the parts that document it
-    # and the ones that announce the section it belongs to.
+    # [doc lines, divider titles] for the comment block above `line`. A bare
+    # divider has a nil title and still starts a section.
     def doc_and_dividers(lines, comments, line)
-      block = raw_comment_lines(lines, comments, line)
       titles = []
 
-      doc = block.reject do |comment|
-        divider, title = divider_title(comment)
-        next false unless divider
-
-        titles << title
-        true
+      doc = raw_comment_lines(lines, comments, line).reject do |comment|
+        match = DIVIDERS.lazy.filter_map { |pattern| comment.match(pattern) }.first
+        titles << match[1].presence if match
+        match
       end
 
       [ doc.map { |c| c.sub(/\A#\s?/, "").rstrip }, titles ]
     end
 
-    # A divider's title, or nil when the comment is not one. An empty title is
-    # a real thing here -- the library uses a bare rule to separate two blocks
-    # of the same section -- so the answer is an array rather than a string:
-    # [true, nil] for a divider with no name, [false, nil] for prose.
-    def divider_title(comment)
-      [ CLOSED_DIVIDER, OPEN_DIVIDER, TRAILING_DIVIDER ].each do |pattern|
-        next unless (match = comment.match(pattern))
-
-        return [ true, match[1].presence ]
-      end
-
-      [ false, nil ]
-    end
-
-    def doc_for(lines, comments, line) = doc_and_dividers(lines, comments, line).first
-
-    # Every comment line above `line`, up to the nearest code line. Blank lines
-    # are walked through rather than stopping the scan: the library puts a blank
-    # line between a section divider and the method it introduces, and treating
-    # that as the end of the comment would lose every documented method.
-    #
-    # Called once per method definition with the file's lines handed in. It used
-    # to take the source and split it itself, which is how 436 methods came to
-    # ask for 343,000 lines between them.
+    # Comment lines above `line`, up to the nearest code. Blank lines are
+    # walked through: the library puts one between a divider and its method.
     def raw_comment_lines(lines, comments, line)
       out = []
-
       index = line - 2
+
       while index >= 0
-        text = lines[index].to_s
+        text = lines[index].strip
+        break unless text.empty? || text.start_with?("#")
 
-        if text.strip.empty?
-          index -= 1
-          next
-        end
-
-        break unless text.strip.start_with?("#")
-
-        out.unshift(*(comments[index + 1] || []))
+        out.unshift(*comments[index + 1]) unless text.empty?
         index -= 1
       end
 
       out
     end
 
-    # The line count comes from the caller, which has already split the file.
+    # Ruby drops comments from the parse tree, so they come from the lexer.
     def comments_by_line(source, line_count)
       lines = Array.new(line_count + 1) { [] }
 
@@ -407,18 +260,20 @@ class ConsoleDocumentation
       lines
     end
 
-    # Definitions with their signature read straight off the source.
     def definitions(lines, sexp)
-      return [] unless sexp
-
       found = []
 
       walk(sexp) do |node|
-        line = definition_line(node)
-        next unless line
+        next unless %i[def defs].include?(node[0])
 
-        name = definition_name(node)
-        next unless name
+        target = node[0] == :def ? node[1] : node[2]
+        line = target[2][0] if target.is_a?(Array) && target[2].is_a?(Array) && target[2][0].is_a?(Integer)
+        name =
+          case target[0]
+          when :@ident, :@const, :@op, :@kw then target[1].to_s
+          when :call then target[3].to_s
+          end
+        next unless line && name
 
         found << { name: name, line: line, signature: signature_at(lines, line) }
       end
@@ -426,45 +281,20 @@ class ConsoleDocumentation
       found.sort_by { |d| d[:line] }
     end
 
-    def definition_line(node)
-      case node[0]
-      when :def then constant_line(node[1])
-      when :defs then constant_line(node[2])
-      end
-    end
-
-    def definition_name(node)
-      target = node[0] == :def ? node[1] : node[2]
-
-      case target[0]
-      when :@ident, :@const, :@op, :@kw then target[1].to_s
-      when :call then target[3].to_s
-      end
-    end
-
-    def constant_line(node)
-      node[2][0] if node.is_a?(Array) && node[2].is_a?(Array) && node[2][0].is_a?(Integer)
-    end
-
-    # `def draw.sprite(path:, x:, y:)` and friends. Read from the source rather
-    # than rebuilt from the parse tree: what a reader needs is the line as
-    # written, including its default arguments.
+    # The line as written, defaults and all, continued while parens are open.
     def signature_at(lines, line)
       out = lines[line - 1].to_s.strip
-
       depth = out.count("(") - out.count(")")
-      following = line
-      while depth.positive? && following < lines.size
-        following += 1
-        out = "#{out} #{lines[following - 1].strip}"
-        depth += lines[following - 1].count("(") - lines[following - 1].count(")")
+
+      while depth.positive? && line < lines.size
+        line += 1
+        out = "#{out} #{lines[line - 1].strip}"
+        depth += lines[line - 1].count("(") - lines[line - 1].count(")")
       end
 
       out.sub(/[;\s]+\z/, "")
     end
 
-    # Every node in the tree, so a definition nested three modules deep is found
-    # the same way as one at the top.
     def walk(node, &block)
       return unless node.is_a?(Array)
 

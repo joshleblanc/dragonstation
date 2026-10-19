@@ -63,7 +63,7 @@ class Api::CartsControllerTest < ActionDispatch::IntegrationTest
   # cartridge.
   test "a retired key is refused and creates nothing" do
     _, retired = ApiKey.issue!(users(:one))
-    ApiKey.rotate!(users(:one))
+    ApiKey.issue!(users(:one))
 
     assert_no_difference -> { Cartridge.count } do
       post_carts(space_cart, key: retired)

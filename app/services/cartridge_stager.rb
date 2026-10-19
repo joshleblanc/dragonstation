@@ -1,44 +1,25 @@
-# The exact tree one cartridge serves, and the manifest that describes it.
-#
-# A cart is a directory, not a file, so serving one is not "return the code" --
-# it is answering two questions the DragonRuby HTML5 loader asks before it will
-# run anything:
-#
-#   GET manifest.json   -> what files exist, and how big is each one
-#   GET gamedata/<path> -> the bytes of one of them
-#
-# This class is the single answer to both. Nothing else in the app decides what
-# a cartridge contains.
+# The exact tree one cartridge serves. The DragonRuby HTML5 loader asks two
+# questions before it runs anything -- manifest.json (what files, how big) and
+# gamedata/<path> (their bytes) -- and this is the only answer to both.
 #
 # The file set mirrors console/publish-cart:
 #
-#   app/main.rb            generated here, pinning exactly this cart
+#   app/main.rb            generated, pinning exactly this cart
 #   app/console/*.rb       the pinned console version's library
 #   font.ttf, tiny.ttf     read from the game root, so they cannot live in a cart
-#   carts/<name>/**        the cartridge's own code and assets, verbatim
+#   metadata/*             the engine reads these from the game root too
+#   carts/<name>/**        the cartridge's own files, verbatim
 #
-# What is deliberately NOT here is console-root starter art. publish-cart
-# stages the cart alone so that a borrowed asset becomes a visibly missing
-# sprite rather than an invisible dependency on art the build does not
-# contain; the same reasoning applies here, and CartridgeIngest enforces it at
-# upload time instead of discovering it at page load.
+# Console-root starter art is deliberately absent: a borrowed asset should be
+# visibly missing, and CartridgeIngest refuses one at upload time.
 class CartridgeStager
   class MissingLibrary < StandardError; end
 
-  # One file in the served tree.
-  #
-  # byte_size is the number the manifest publishes and the number the loader
-  # allocates a buffer of. It must be the exact byte length of what resolve
-  # returns -- the loader writes `new Array(manifest.filesize)` and fills it
-  # from the downloaded bytes, so a short read pads the file with zeros and a
-  # long one truncates it, silently, in both cases.
-  ServedFile = Struct.new(:path, :byte_size, :filetime, :source, keyword_init: true) do
-    def generated? = source == :generated
-    def library? = source == :library
-    def cartridge? = source == :cartridge_file
-  end
+  # byte_size must be the exact length of the bytes served: the loader
+  # allocates `new Array(filesize)` and silently pads or truncates to it.
+  ServedFile = Struct.new(:path, :byte_size, :filetime, :source, keyword_init: true)
 
-  GENERATED_PATH = "app/main.rb".freeze
+  ENTRY_PATH = "app/main.rb".freeze
 
   attr_reader :cartridge
 
@@ -50,69 +31,47 @@ class CartridgeStager
 
   def metadata = @metadata ||= ConsoleMetadata.new(cartridge: cartridge, library: library)
 
-  # The HTML5 loader this cartridge is served.
-  #
-  # Not part of files/ because it is not part of the game's virtual filesystem
-  # -- the loader lives in the build and fetches the manifest; it is never
-  # written into MEMFS. It is cartridge-specific because its header names the
-  # game, so it cannot be served as a shared static file.
+  # Per-cartridge because its header names the game.
   def build = @build ||= Html5Build.new(cartridge)
 
-  # The entry point that gets served.
-  #
-  # Generated rather than taken from the cart, and it pins the cart so the
-  # build is only *able* to run one game. The require list is read out of the
-  # library's own app/main.rb rather than written out here: a second copy of
-  # that list is exactly how a served cart ends up missing a library module
-  # the console has.
-  def entry_source
-    @entry_source ||= build_entry_source
-  end
-
-  # path => { filesize:, filetime: }
-  #
-  # The shape the loader JSON.parses directly into state.remote_manifest.
+  # path => { filesize:, filetime: }, the shape the loader parses directly.
   def manifest
     files.to_h { |f| [ f.path, { filesize: f.byte_size, filetime: f.filetime } ] }
   end
 
-  # Every file in the served tree, in a stable order.
   def files
-    @files ||= [
-      generated_file,
-      *library_files,
-      *metadata_files,
-      *cartridge_files
-    ].compact.freeze
+    @files ||= [ entry_file, *library_files, *metadata_files, *cartridge_files ].freeze
   end
 
-  # One file by its served path, or nil. Backs the gamedata route.
-  def resolve(path)
-    index[path.to_s]
-  end
+  def resolve(path) = index[path.to_s]
 
-  def entry_path = GENERATED_PATH
+  # The bytes for one served path, or nil when the tree has no such file.
+  def read(path)
+    file = resolve(path) or return nil
 
-  private
-    def index
-      @index ||= files.to_h { |f| [ f.path, f ] }
+    case file.source
+    when :generated then entry_source
+    when :library then library.read(file.path)
+    when :metadata then file.path == ConsoleMetadata::PATH ? metadata.content : metadata.icon
+    when :cartridge_file
+      cartridge.cartridge_files.find_by!(path: file.path.delete_prefix("#{cartridge.cart_prefix}/")).blob.download
     end
+  end
 
-    def build_entry_source
-      raise MissingLibrary, "console #{cartridge.console_version.version} is missing its library" unless library.available?
+  # Generated rather than taken from the cart, so the build can only run this
+  # one game. The require list comes from the library's own app/main.rb, never
+  # a second copy of it.
+  def entry_source
+    @entry_source ||= begin
+      requires = require_library!.require_paths.map { |p| "require '#{p}'\n" }.join
 
-      header = <<~RUBY
+      source = <<~RUBY
         # GENERATED BY DragonStation -- DO NOT EDIT.
         #
         # Single-cart entry point for '#{cartridge.cart_name}', pinned to console
         # #{cartridge.console_version.version}. The console library is unmodified;
         # only this file differs from a checkout of it.
-      RUBY
-
-      requires = library.require_paths.map { |p| "require '#{p}'\n" }.join
-
-      body = <<~RUBY
-
+        #{requires}
         module Main
           def boot
             Console::CartLoader.new($args).pin('#{cartridge.cart_prefix}').run
@@ -128,76 +87,45 @@ class CartridgeStager
         end
       RUBY
 
-      # String#length counts characters, not bytes. A generated file containing
-      # a non-ASCII character in a comment would publish a manifest size that
-      # is wrong by exactly the difference, and the loader would write a
-      # zero-padded file that fails to parse with a syntax error pointing at
-      # the end of the file rather than at the manifest.
-      (header + requires + body).dup.force_encoding(Encoding::BINARY)
+      # Binary, so bytesize and the manifest agree even if a title is non-ASCII.
+      source.b
+    end
+  end
+
+  private
+    def index = @index ||= files.index_by(&:path)
+
+    def require_library!
+      return library if library.available?
+
+      raise MissingLibrary, "console #{cartridge.console_version.version} is missing its library"
     end
 
-    def generated_file
-      bytes = entry_source
-      ServedFile.new(
-        path: GENERATED_PATH,
-        byte_size: bytes.bytesize,
-        # Moves when the cartridge does, and not otherwise: this file is
-        # derived from the cart's name and the library's require list.
-        filetime: cartridge.updated_at.to_i,
-        source: :generated
-      )
+    def entry_file
+      # Derived from the cart name and the library's require list, so it moves
+      # with the cartridge and not otherwise.
+      ServedFile.new(path: ENTRY_PATH, byte_size: entry_source.bytesize,
+                     filetime: cartridge.updated_at.to_i, source: :generated)
     end
 
     def library_files
-      raise MissingLibrary, "console #{cartridge.console_version.version} is missing its library" unless library.available?
-
-      filetime = library.filetime
-      library.file_paths.map do |path|
-        ServedFile.new(
-          path: path,
-          byte_size: library.size_of(path),
-          filetime: filetime,
-          source: :library
-        )
+      require_library!.file_paths.map do |path|
+        ServedFile.new(path: path, byte_size: library.size_of(path), filetime: library.filetime, source: :library)
       end
     end
 
-    # metadata/game_metadata.txt and metadata/icon.png, at the game root.
-    #
-    # Not optional. The build reads the icon to draw the click-to-play overlay
-    # and throws if it is absent, which leaves the game running on a blank
-    # canvas with no way to start it. publish-cart stages both for the same
-    # reason.
+    # Not optional: the build reads metadata/icon.png to draw the click-to-play
+    # overlay and throws without it, leaving a blank canvas nobody can start.
     def metadata_files
-      bytes = metadata.content
-      icon = metadata.icon
-
-      [
-        ServedFile.new(
-          path: ConsoleMetadata::PATH,
-          byte_size: bytes.bytesize,
-          filetime: cartridge.updated_at.to_i,
-          source: :metadata
-        ),
-        ServedFile.new(
-          path: ConsoleMetadata::ICON_PATH,
-          byte_size: icon.bytesize,
-          filetime: cartridge.updated_at.to_i,
-          source: :metadata
-        )
-      ]
+      { ConsoleMetadata::PATH => metadata.content, ConsoleMetadata::ICON_PATH => metadata.icon }.map do |path, bytes|
+        ServedFile.new(path: path, byte_size: bytes.bytesize, filetime: cartridge.updated_at.to_i, source: :metadata)
+      end
     end
 
     def cartridge_files
-      prefix = cartridge.cart_prefix
       cartridge.cartridge_files.ordered.map do |file|
-        ServedFile.new(
-          path: "#{prefix}/#{file.path}",
-          # Denormalised at ingest from the bytes that were actually written.
-          byte_size: file.byte_size,
-          filetime: file.filetime,
-          source: :cartridge_file
-        )
+        ServedFile.new(path: "#{cartridge.cart_prefix}/#{file.path}", byte_size: file.byte_size,
+                       filetime: file.filetime, source: :cartridge_file)
       end
     end
 end

@@ -58,73 +58,25 @@ module CartridgeTestHelper
     }.merge(extra)
   end
 
-  # A console every test can build a cartridge against.
-  #
-  # Installed through ConsoleLibraryInstall rather than created as a bare row.
-  # Most of what the suite exercises is *reading* a library -- the manifest, the
-  # documentation pages, the release bundle -- and a row with no files behind it
-  # would make those assertions pass against nothing. Marked default in the same
-  # breath: the app's rule is that a fresh install with no flag set still uploads
-  # something, and a test that pinned a version and got a different default would
-  # be testing the fixture rather than the code.
-  #
-  # The real console checkout, so the library under test is the one that ships.
-  # CONSOLE_PATH points at it; the sibling checkout is the default because that is
-  # where it lives next to this repository.
-  #
-  # Keyed on the version the checkout's own library declares, not on a constant
-  # written here. Those two drifting apart is not a hypothetical: the install
-  # labels its row from app/console/version.rb, so a constant left at the last
-  # release made this look for a row the install had never created, and the second
-  # call in a single test installed a second version over the top of it and died
-  # on the unique index. Nothing here should have to be bumped when the console
-  # ships.
+  # A console every test can build a cartridge against: the real checkout,
+  # installed through ConsoleLibraryInstall (a bare row would make every read
+  # assertion pass against nothing) and marked default. Keyed on the version the
+  # checkout declares, so nothing here needs bumping when the console ships.
   def console_version!(version: CartridgeTestHelper.real_console_version)
     ConsoleVersion.find_by(version: version) ||
       install_real_console_library(version).tap { |installed| installed.update!(default: true) }
   end
 
-  # The version the checkout's library declares, which is the version
-  # ConsoleLibraryInstall will label its row with.
-  #
-  # Asked through the same inspect both install paths use, so this cannot answer
-  # something install would refuse -- and memoised per process alongside the
-  # entries, because it reads the whole tree to get one number.
+  # Memoised per process, because it reads the whole tree to get one number.
   def self.real_console_version
-    @real_console_version ||=
-      begin
-        declared, problems = ConsoleLibraryInstall.inspect(console_entries)
-        raise "console checkout is not installable: #{problems.join('; ')}" if problems.any?
-
-        declared
-      end
+    @real_console_version ||= ConsoleLibraryInstall.check!(console_entries)
   end
 
-  # Where the console checkout is. Tests that need a real library read it from
-  # here rather than from a copy in this repository, which is what the storage
-  # change removed.
-  def console_checkout
-    path = ENV["CONSOLE_PATH"].presence || Rails.root.join("../dragonruby/console").to_s
-
-    unless File.directory?(path)
-      raise "console checkout not found at #{path}. Set CONSOLE_PATH to a console checkout."
-    end
-
-    path
-  end
-
-  # Install the real library, straight from the checkout, through the same
-  # ConsoleLibraryInstall the rake task and the upload screen use.
   def install_real_console_library(version = CartridgeTestHelper.real_console_version)
     ConsoleLibraryInstall.install!(real_console_entries, title: "Console #{version}")
   end
 
-  # The checkout's files, read once per process.
-  #
-  # The suite installs this library in hundreds of tests, and the tree includes
-  # font.ttf at 3.4MB -- reading it per test turns a fast suite into a slow one
-  # for no gain. The install itself still happens per test, because that is what
-  # the tests are about; only the read is shared.
+  # Read once per process (font.ttf alone is 3.4MB); installed per test.
   def real_console_entries = CartridgeTestHelper.console_entries
 
   def console_checkout = CartridgeTestHelper.console_checkout
@@ -147,22 +99,7 @@ module CartridgeTestHelper
     error
   end
 
-  # The bytes the runtime would serve for one path of a cartridge's manifest.
-  def served_bytes(cartridge, path)
-    file = cartridge.stager.resolve(path)
-
-    case file.source
-    when :generated      then cartridge.stager.entry_source
-    when :library        then cartridge.console_version.library.read(path)
-    when :metadata       then cartridge.stager.metadata.public_send(
-      path == ConsoleMetadata::PATH ? :content : :icon
-    )
-    when :cartridge_file
-      cartridge.cartridge_files
-        .find_by!(path: path.delete_prefix("#{cartridge.cart_prefix}/"))
-        .blob.download
-    end
-  end
+  def served_bytes(cartridge, path) = cartridge.stager.read(path)
 end
 
 ActiveSupport::TestCase.include CartridgeTestHelper

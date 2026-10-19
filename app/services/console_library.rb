@@ -1,223 +1,108 @@
-# One console library, as it will be served to the DragonRuby HTML5 build.
-#
-# This is the Ruby half of what console/publish-cart does with a shell script.
-# The script stages a directory so dragonruby-publish has exactly one cart to
-# package; here the library is never a directory at all -- it is a set of blobs
-# attached to a ConsoleVersion row, described by path. The rules the script
-# enforces are the rules this class reproduces:
-#
-#   * the library travels with every cart, because a cart is meaningless
-#     without it;
-#   * the library's own app/main.rb is the require list, read from the stored
-#     bytes rather than duplicated, so a library update cannot leave a stale
-#     copy of it behind;
-#   * the entry point that gets served pins one cart, so a build that is only
-#     *able* to run that cart is a property of the build.
-#
-# One reader serves both a stored library and a candidate that has not been
-# stored yet: `entries:` names the bytes directly, which is how an uploaded
-# archive is checked before a single row exists for it. The validation below is
-# then the same validation that will run again once the bytes land, because it
-# is this class doing both.
+# One console library, read either from the blobs stored against a
+# ConsoleVersion or -- with `entries:` -- from path => bytes in hand, which is
+# how an upload is validated before any row exists for it.
 class ConsoleLibrary
   class Missing < StandardError; end
 
-  # The library's own entry point. It is a template, not something that is
-  # ever served verbatim: the served version pins a cart.
+  # Never served verbatim: it is the require list, and the served entry point
+  # is generated to pin one cart.
   ENTRY_TEMPLATE = "app/main.rb"
-
   MODULE_PREFIX = "app/console/"
 
-  # Read from the game root by DragonRuby, so they cannot live inside a cart.
-  # Which of them exist varies by version, so this is a filter, not a list.
+  # Read from the game root, so they cannot live in a cart. Varies by version.
   FONT_CANDIDATES = %w[font.ttf tiny.ttf].freeze
 
-  # A require of a library module, in the exact form app/main.rb writes them.
-  REQUIRE_PATTERN = /^require\s+'(app\/console\/[^']+)'\s*$/
-
-  # MAJOR/MINOR/PATCH from app/console/version.rb, used to check that the
-  # library is labelled with the version it actually contains.
+  REQUIRE_PATTERN = %r{^require\s+'(app/console/[^']+)'\s*$}
   VERSION_CONSTANT = /\b([A-Z]+)\s*=\s*(\d+)\b/
 
   attr_reader :console_version
 
-  # Takes a ConsoleVersion, or a bare version string for callers that are
-  # inspecting a library that has no row yet -- the install is exactly that
-  # case, since it has to decide which version to create the row under.
-  #
-  # `entries:` supplies the bytes directly, as path => String. It is how a
-  # candidate is read before it is stored, and how a test can hold a library
-  # that the database has never seen. With no entries the library is the one
-  # stored against the row.
+  # Takes a ConsoleVersion, or a version string for a library with no row yet.
   def initialize(console_version, entries: nil)
-    @console_version =
-      if console_version.is_a?(ConsoleVersion)
-        console_version
-      else
-        ConsoleVersion.new(version: console_version.to_s)
-      end
+    @console_version = console_version.is_a?(ConsoleVersion) ? console_version : ConsoleVersion.new(version: console_version.to_s)
     @entries = entries&.transform_keys(&:to_s)
   end
 
-  # True when these bytes came from `entries:` rather than from the database.
   def candidate? = !@entries.nil?
 
-  # True when this library can be read: it has an entry point, and that entry
-  # point's bytes are actually where the library says they are.
-  #
-  # The second half is not belt-and-braces. This used to ask only whether a row
-  # named app/main.rb, which is a question about the database, and the answer
-  # told every caller in the app that a version whose blobs had been left behind
-  # on a disk this container does not have was fine to build against. The first
-  # read then raised ActiveStorage::FileNotFoundError from inside storage, and
-  # because every guard in the app -- the admin index, the docs pages, the
-  # upload dropdown, the stager -- wraps its reads in a rescue for
-  # ConsoleLibrary::Missing, none of them caught it. A version that could not
-  # serve anything took down every page that merely listed versions, and
-  # installing a working library beside it changed nothing, because the listing
-  # still walked the broken row.
-  #
-  # Candidates answer from the hash, which cannot lose a file it was handed.
+  # Whether the entry point's *bytes* can be fetched, not just whether its row
+  # exists. Rows outlive their blobs when the storage service changes, and a
+  # version that answered "available" while every read raised took down every
+  # page that merely listed versions.
   def available?
     return @available unless @available.nil?
 
     @available = candidate? ? file?(ENTRY_TEMPLATE) : !!records[ENTRY_TEMPLATE]&.readable?
   end
 
-  def entry_source
-    @entry_source ||= read(ENTRY_TEMPLATE)
-  end
+  def entry_source = @entry_source ||= read(ENTRY_TEMPLATE)
 
-  # Library modules in require order.
-  #
-  # Order is load-bearing: the modules reference each other at call time rather
-  # than at load time, but main.rb still requires them in an order that has to
-  # be preserved exactly. Sorting these alphabetically would be a subtle way to
-  # break a library update.
-  def require_paths
-    @require_paths ||= entry_source.scan(REQUIRE_PATTERN).flatten.freeze
-  end
+  # In require order, which is load-bearing: never sort this.
+  def require_paths = @require_paths ||= entry_source.scan(REQUIRE_PATTERN).flatten.freeze
 
-  # Every library file the served tree contains, relative and forward-slashed.
-  def file_paths
-    @file_paths ||= (require_paths + fonts).freeze
-  end
+  # Every library file the served tree contains.
+  def file_paths = @file_paths ||= (require_paths + fonts).freeze
 
-  def fonts
-    @fonts ||= FONT_CANDIDATES.select { |f| file?(f) }.freeze
-  end
+  def fonts = @fonts ||= FONT_CANDIDATES.select { |f| file?(f) }.freeze
 
-  # Every stored path, sorted. This is what the release bundle walks, in place
-  # of the directory listing it used to take.
-  def paths
-    @paths ||= candidate? ? @entries.keys.sort : records.keys.sort
-  end
+  # Every stored path, sorted.
+  def paths = @paths ||= (candidate? ? @entries.keys : records.keys).sort
 
-  # Stored paths directly under a top-level directory, sorted.
-  def paths_under(directory)
-    prefix = "#{directory}/"
-
-    paths.select { |path| path.start_with?(prefix) }
-  end
-
-  def file?(relative)
-    lookup(relative) ? true : false
-  end
+  def file?(relative) = !lookup(relative).nil?
 
   def size_of(relative)
     entry = lookup(relative) or raise_missing(relative)
-
     candidate? ? entry.bytesize : entry.byte_size
   end
 
   def read(relative)
     entry = lookup(relative) or raise_missing(relative)
-
-    return entry if candidate?
-
-    entry.read
+    candidate? ? entry : entry.read
   rescue ActiveStorage::FileNotFoundError, ActiveStorage::IntegrityError, ActiveRecord::RecordNotFound
-    # The row is here and the bytes are not, which is the same condition as a
-    # library that never had them: an install that cannot be read. Raised as
-    # what this exception has always meant rather than letting a storage error
-    # escape, because that is what the pages guarding a broken library already
-    # rescue, and it is what the stager's own MissingLibrary means too. The
-    # caller that wants to know *why* it is broken can look at the blob.
+    # A row without bytes is the same as no row: every caller already rescues Missing.
     raise_missing(relative)
   end
 
-  # A stable filetime for every file in this library.
-  #
-  # The loader re-downloads a cached file when filetime moves, so this must not
-  # change just because a page was viewed. The version's own creation time is
-  # exactly the right granularity: it moves when the library does, and not
-  # otherwise.
+  # The loader re-downloads when filetime moves; the version's creation time
+  # moves exactly when the library does.
   def filetime = console_version.created_at.to_i
 
-  # A token that changes exactly when this library's bytes change.
-  #
-  # Keyed on the blob each file's bytes live behind, because that is the only
-  # thing that identifies the bytes. The version's own created_at, which
-  # filetime above is built on, will not do: console:install fills an empty row
-  # in after the fact, which moves the files without moving the version. A blob
-  # row is immutable once written -- a change to the library is a new blob, not
-  # a rewritten one -- so the ids cannot repeat with different content behind
-  # them, and this catches a repair that a version id or a timestamp would miss.
-  #
-  # Hashed rather than kept as a list, because a version's whole file list is
-  # longer than a cache key wants to be. SHA and not #hash: String#hash is
-  # seeded per process, so the same library would key differently in every Puma
-  # worker and every restart, and the store would fill with copies that never
-  # hit again.
+  # Changes exactly when the stored bytes do. Keyed on blob ids, not created_at,
+  # because console:install can refill a row without moving it. SHA rather than
+  # #hash, which is seeded per process.
   def content_token
     @content_token ||= Digest::SHA256.hexdigest(
       records.map { |path, file| "#{path}\0#{file.blob&.id}" }.sort.join("\n")
     )
   end
 
-  # The version string the library itself claims to be, read from version.rb.
-  #
-  # Checked against the row's version on load. A library stored under a version
-  # it does not claim would otherwise be served to every new upload under a
-  # label nobody can reconcile with the code, which is the kind of drift that is
-  # only noticed much later.
+  # MAJOR.MINOR.PATCH from app/console/version.rb, or nil when unreadable.
   def declared_version
-    return nil unless file?(MODULE_PREFIX + "version.rb")
+    path = MODULE_PREFIX + "version.rb"
+    return nil unless file?(path)
 
-    constants = read(MODULE_PREFIX + "version.rb").scan(VERSION_CONSTANT).to_h
-    %w[MAJOR MINOR PATCH].map { |k| constants[k] }.compact.join(".")
+    constants = read(path).scan(VERSION_CONSTANT).to_h
+    %w[MAJOR MINOR PATCH].filter_map { |k| constants[k] }.join(".")
+  rescue Missing
+    nil
   end
 
-  # True when the row is labelled with the version the library contains.
   def label_matches_contents?
     declared = declared_version
     declared.present? && declared == console_version.version
   end
 
   private
-    # Every stored file, keyed by path.
-    #
-    # with_attached_blob, and not a plain has_many, because reading the bytes is
-    # the entire purpose of this class. A plain association loads the file rows
-    # and nothing else, so the first .blob on each one resolved the attachment
-    # row and then the blob row -- two queries per file, every time, with no
-    # memoization to catch them. Twenty library files cost forty-four queries
-    # for a single /docs request, and against a network storage service every
-    # one of those also carried a round trip.
+    # with_attached_blob: reading bytes is the point, and without it each file
+    # costs two extra queries (and a network round trip per query on Spaces).
     def records
       @records ||= console_version.console_library_files.with_attached_blob.index_by(&:path)
     end
 
-    # The bytes behind one path, from wherever this library is being read.
-    #
-    # Containment is not re-checked here, because it cannot need checking: a
-    # candidate is a hash keyed by the exact path, and a stored library is a
-    # row looked up by the same. Neither has a filesystem for a path to escape
-    # into, and a path that names nothing is a miss rather than a traversal.
+    # Exact-key lookup into a hash or rows, so there is no filesystem for a
+    # path to escape into.
     def lookup(relative)
-      path = relative.to_s
-
-      candidate? ? @entries[path] : records[path]
+      candidate? ? @entries[relative.to_s] : records[relative.to_s]
     end
 
     def raise_missing(relative)

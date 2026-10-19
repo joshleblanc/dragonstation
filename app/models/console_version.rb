@@ -1,15 +1,7 @@
-# One published version of the console library.
-#
-# The library source lives in ActiveStorage, one blob per file, addressed by
-# path through the console_library_files rows this has_many. This row is what
-# a cartridge is pinned to; the files are what those pins resolve to.
+# One version of the console library, which a cartridge is pinned to forever.
+# Its files are blobs, one per path, through console_library_files.
 class ConsoleVersion < ApplicationRecord
   has_many :cartridges, dependent: :restrict_with_error
-
-  # Dependent destroy rather than restrict: a version's files are part of the
-  # version, so removing the row should remove them. Cartridges above still
-  # refuse the removal, which is the guard that actually matters -- a version
-  # somebody is still pinned to must not go away, attached or not.
   has_many :console_library_files, dependent: :destroy
 
   validates :version, presence: true, uniqueness: true,
@@ -20,34 +12,28 @@ class ConsoleVersion < ApplicationRecord
 
   def to_s = version
 
-  # What a new upload gets pinned to. The flag wins; otherwise the newest
-  # version, so a fresh install with no flag set still uploads something.
-  #
-  # The fallback skips versions that cannot be read, because pinning a cartridge
-  # to one of those produces a game that can never boot: the pin is permanent, so
-  # the mistake is permanent too, and the fallback is the one path here that
-  # picks a version nobody chose. A version an admin has *flagged* is honoured
-  # either way -- that is a deliberate act, and an admin page showing it broken
-  # is where that gets answered.
+  # What a new upload is pinned to. A flagged default is honoured even if
+  # broken -- an admin chose it, and the admin page shows it broken. The
+  # fallback skips unreadable versions, because a pin nobody chose to a library
+  # that cannot boot is permanent.
   def self.default
-    default_first.where(default: true).first || newest_first.find(&:available?)
+    newest_first.find_by(default: true) || newest_first.find(&:available?)
   end
 
-  # The library this row points at.
-  #
-  # Cleared on reload: @library is a plain ivar, so ActiveRecord does not know
-  # about it and a reload would leave a library that was read before the files
-  # existed still answering "no app/main.rb" afterwards. That matters when a
-  # broken install is repaired -- `console:install` fills an empty row in, and
-  # every holder of the object must see the version it just became.
-  def library
-    @library ||= ConsoleLibrary.new(self)
+  def make_default!
+    transaction do
+      ConsoleVersion.where.not(id: id).where(default: true).update_all(default: false)
+      update!(default: true)
+    end
   end
 
-  def reload(options = nil)
+  def library = @library ||= ConsoleLibrary.new(self)
+
+  def available? = library.available?
+
+  # @library memoizes what it read; a version repaired in place must re-read.
+  def reload(...)
     @library = nil
     super
   end
-
-  def available? = library.available?
 end

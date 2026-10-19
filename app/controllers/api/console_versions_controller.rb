@@ -1,41 +1,18 @@
-# Releasing a new console version to the site.
+# POST /api/console_versions -- releasing a console from bin/publish-console.
 #
-# The same install the admin upload screen does, for the console that is going
-# to become the new default: one ZIP, validated by ConsoleLibraryInstall, and
-# never overwriting a version that already exists.
-#
-# **Admin only, checked here rather than in the client.** The console that ships
-# a release script is a different download from the one everybody gets, but the
-# file being absent is a courtesy, not a control -- anyone can curl this
-# endpoint with any key they like. So the credential is resolved to its owner
-# and the owner has to be an admin, and the bundle's extra file is only a
-# convenience for somebody who already is one.
+# Admin only, checked here: the release script being absent from non-admin
+# downloads is a courtesy, and anyone can curl this with any key.
 module Api
-  class ConsoleVersionsController < ApplicationController
-    # Key-authenticated, like the cart API: a missing key has to be a 401 here,
-    # never a redirect to a sign-in form a terminal cannot answer.
-    allow_unauthenticated_access
+  class ConsoleVersionsController < BaseController
+    before_action :require_admin!
 
-    skip_forgery_protection
-
-    before_action :authenticate_admin!
-
-    # POST /api/console_versions
-    #
-    #   Authorization: Bearer ds_...
-    #   archive=<the console ZIP>
     def create
-      archive = params[:archive]
-
-      if archive.blank?
-        return render json: {
-          error: "no archive",
-          problems: [ "send the console as multipart/form-data under `archive`" ]
-        }, status: :bad_request
+      if params[:archive].blank?
+        return render_problems("no archive", "send the console as multipart/form-data under `archive`", :bad_request)
       end
 
       console_version = ConsoleLibraryInstall.new(
-        archive: archive,
+        archive: params[:archive],
         title: params[:title],
         notes: params[:notes]
       ).call
@@ -43,32 +20,20 @@ module Api
       render json: {
         version: console_version.version,
         title: console_version.title,
-        # Never the default: installing a version and choosing to build against
-        # it are two decisions, and the second one is a person's.
+        # Never the default: choosing to build against it is a person's call.
         default: console_version.default,
-        modules: ConsoleDocumentation.new(console_version).modules.size,
+        modules: console_version.library.require_paths.size,
         url: admin_console_version_url(console_version)
       }, status: :created
     rescue ConsoleLibraryInstall::Invalid => e
-      render json: { error: "that archive is not a console I can install", problems: e.problems },
-        status: :unprocessable_content
+      render_problems("that archive is not a console I can install", e.problems, :unprocessable_content)
     end
 
     private
-      def authenticate_admin!
-        key = ApiKey.from_authorization(request.authorization)
+      def require_admin!
+        return if Current.user.admin?
 
-        return render json: { error: "unauthorised" }, status: :unauthorized unless key
-        return forbidden unless key.user.admin?
-
-        Current.api_key = key
-      end
-
-      def forbidden
-        render json: {
-          error: "forbidden",
-          problems: [ "releasing a console version is an administrator's job" ]
-        }, status: :forbidden
+        render_problems("forbidden", "releasing a console version is an administrator's job", :forbidden)
       end
   end
 end

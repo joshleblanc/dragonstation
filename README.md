@@ -360,7 +360,7 @@ also holds build output, screenshots, the cart you are working on, and
 all of it is how a 3.9MB release turned into 104MB of blobs and put a live API
 key in the library the site serves.
 
-Both paths run the same checks through `ConsoleLibraryInstall.inspect`, so a
+Both paths run the same checks through `ConsoleLibraryInstall.check`, so a
 library cannot be accepted by the task and refused by the screen, or the
 reverse. The task is still the better route when the library is already in a
 checkout, because it reads the files where they are rather than asking for them
