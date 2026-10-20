@@ -3,10 +3,9 @@
 <div class="page-head">
   <h1>The console library</h1>
   <p class="lede">
-    Everything you need to write a cart for this site. The console runs 60
-    times a second and the library travels with your upload, so nothing here
-    needs installing and nothing needs requiring.
-    This is console <%= @console_version.version %><%= ", the version a new upload is pinned to" if @console_version.default? %>.
+    Everything you need to write a cart and publish it here. A cart never has to
+    include the library: the site supplies it whenever the cart runs.
+    These docs cover console <%= @console_version.version %><%= ", the version new uploads are pinned to" if @console_version.default? %>.
   </p>
 </div>
 
@@ -23,26 +22,28 @@
 <section class="doc-section" id="start">
   <h2><span class="doc-num">1.</span> Getting started</h2>
   <p>
-    Your cart is a folder. One Ruby file inside it defines a class, and that class
-    is the cart. Art and data go in folders of their own. Zip the cart folder and
-    upload it.
+    A cart is a folder inside the console's <code>carts/</code> folder. It holds
+    one Ruby class, plus any art, sound and data the cart uses:
   </p>
   <pre class="source layout"><%= raw FileHighlighter.new("layout.txt", @guide.layout[:tree]).call %></pre>
   <%= doc_prose(@guide.layout[:rule], class_name: "doc-rule") %>
 
   <p>
-    You need the console to boot a cart. The download holds the library and the
-    tool that boots it, so unpack the download over a checkout and you can run one.
+    To run carts on your own machine you need
+    <a href="https://dragonruby.org">DragonRuby</a> and the console. Make a folder
+    for the console inside your DragonRuby folder, next to the
+    <code>dragonruby</code> program, and unzip the download into it. Then create
+    <code>carts/mine/app/</code> inside it for the examples below.
   </p>
   <p>
     <% if authenticated? %>
-      <%= link_to "Download it with my publishing key", console_bundle_path, class: "button-link" %>
-      <span class="muted">or <%= link_to "just the library", library_download_path %></span>
+      <%= link_to "Download the console with my publishing key", console_bundle_path, class: "button-link" %>
+      <span class="muted">or <%= link_to "download it without a key", library_download_path %></span>
     <% else %>
-      <%= link_to "Download the library", library_download_path, class: "button-link" %>
+      <%= link_to "Download the console", library_download_path, class: "button-link" %>
       <span class="muted">
-        &mdash; <%= link_to "sign in", new_session_path %> to download it with a
-        key that lets you publish carts from the console.
+        &mdash; <%= link_to "sign in", new_session_path %> first to get a download
+        that includes a key for publishing carts from the console.
       </span>
     <% end %>
   </p>
@@ -50,9 +51,11 @@
 
 <section class="doc-section" id="first-cart">
   <h2><span class="doc-num">2.</span> Your first cart</h2>
-  <p class="muted">
-    Five examples, each one building on the last. They all go in the same file.
+  <p>
+    Five complete carts, each adding one idea to the one before. Save each over
+    <code>carts/mine/app/mine.rb</code> and run it from the console folder with:
   </p>
+  <pre class="source">./bin/run mine</pre>
   <% @guide.samples.each do |sample| %>
     <div class="doc-sample" id="<%= sample.id %>">
       <h3><%= sample.title %></h3>
@@ -66,12 +69,12 @@
 </section>
 
 <section class="doc-section" id="publishing">
-  <h2><span class="doc-num">3.</span> Sending a cart here</h2>
+  <h2><span class="doc-num">3.</span> Publishing a cart</h2>
   <p>
-    No archive to build and no upload form. With the bundle unpacked and your key
-    in it:
+    You don't need to build an archive or use the upload form. Once the bundle is
+    unpacked with your key in it, run this from the console folder:
   </p>
-  <pre class="source">./bin/publish-site arcade</pre>
+  <pre class="source">./bin/publish-site mine</pre>
 
   <ol class="doc-steps">
     <% @guide.publishing[:steps].each do |step| %>
@@ -80,12 +83,15 @@
   </ol>
 
   <p class="muted">
-    The same upload, without the browser. Traversal, symlinks and expansion bombs
-    are refused, as is art a cart names but does not own. The message says which one.
+    This is the same upload as the web form, without the browser, and it runs the
+    same checks. Archives with path traversal, symlinks or ZIP bombs are rejected,
+    and so is a cart whose code names a file under <code>sprites/</code>,
+    <code>sounds/</code>, <code>maps/</code> or <code>data/</code> that the cart
+    does not include. The error message says which check failed.
   </p>
 
   <details class="doc-endpoint">
-    <summary>The endpoint, if you are writing your own client</summary>
+    <summary>The API endpoint, for writing your own client</summary>
     <pre class="source"><%= raw FileHighlighter.new("client.rb", @guide.publishing[:endpoint].join("\n")).call %></pre>
   </details>
 </section>
@@ -93,8 +99,8 @@
 <section class="doc-section" id="primer">
   <h2><span class="doc-num">4.</span> Ruby primer</h2>
   <p class="muted">
-    A cart is written in Ruby. This is the part of the language a cart needs,
-    and nothing more.
+    Carts are written in Ruby. This section covers just the parts of the
+    language a cart needs.
   </p>
   <% @guide.primer.each do |topic| %>
     <div class="doc-topic">
@@ -116,7 +122,7 @@
   <h2><span class="doc-num">5.</span> Cart structure</h2>
   <p class="muted">
     What the console does with your cart, and in what order. The API reference
-    says what each method does; this says what happens around them.
+    explains each method; this section explains when they are called.
   </p>
 
   <% @guide.structure.each do |topic| %>
@@ -136,8 +142,11 @@
 
   <div class="doc-topic">
     <h3>The hooks</h3>
-    <%= doc_prose("Every hook is optional. A cart that defines none of them still boots, and does nothing.") %>
+    <%= doc_prose("Every hook is optional. A cart that defines none of them still boots; it just does nothing.") %>
     <table class="doc-table">
+      <thead>
+        <tr><th>Hook</th><th>When it runs</th><th>What it is for</th></tr>
+      </thead>
       <tbody>
         <% @guide.hooks.each do |hook| %>
           <tr>
@@ -154,12 +163,12 @@
 <section class="doc-section" id="reference">
   <h2><span class="doc-num">6.</span> API reference</h2>
   <p>
-    <%= pluralize(@modules.size, "module") %>. Every description is read out of the
-    library's own comments, so it stays true of the code. Only the grouping is
-    written by hand.
+    The library has <%= pluralize(@modules.size, "module") %>. Every description
+    comes from the comments in the library's source, so it stays in sync with the
+    code; only the grouping below is written by hand.
   </p>
   <p class="muted">
-    Each method links to where it is documented in full.
+    Each method links to its full documentation.
   </p>
 
   <% @guide.groups(@modules).each do |group| %>

@@ -224,7 +224,9 @@ It has two halves, and the split is the design:
 - **The guide** is written here
   ([ConsoleGuide](app/services/console_guide.rb)), because what a cart is and
   how to start one is not written down in the library. Five worked examples,
-  each the smallest thing that does the job, plus the hooks table. There is a
+  each a complete cart that adds one idea to the one before — whole files rather
+  than fragments, because pasting a second `def setup` into a cart silently
+  replaces the first — plus the hooks table. There is a
   test that every call in them exists in the library, and another that every one
   of them parses as Ruby — a sample that invents a method is worse than no
   sample, because it reads as authoritative.

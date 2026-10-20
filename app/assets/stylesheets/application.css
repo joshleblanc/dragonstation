@@ -356,6 +356,7 @@ input[type="submit"]:hover, .link-button:hover { filter: brightness(1.08); }
 
 .doc-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
 .doc-table td { padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+.doc-table th { padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--line); text-align: left; color: var(--muted); font-weight: 600; }
 .doc-table td:first-child { white-space: nowrap; }
 .doc-when { color: var(--muted); white-space: nowrap; }
 

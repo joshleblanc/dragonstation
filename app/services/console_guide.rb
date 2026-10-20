@@ -34,7 +34,7 @@ class ConsoleGuide
   SECTIONS = [
     { id: "start", title: "Getting started" },
     { id: "first-cart", title: "Your first cart" },
-    { id: "publishing", title: "Sending a cart here" },
+    { id: "publishing", title: "Publishing a cart" },
     { id: "primer", title: "Ruby primer" },
     { id: "structure", title: "Cart structure" },
     { id: "reference", title: "API reference" }
@@ -44,14 +44,14 @@ class ConsoleGuide
   LAYOUT = {
     tree: <<~TREE,
       carts/mine/
-      |-- app/mine.rb      defines Mine
-      |-- sprites/         the art this cart owns
-      |-- sounds/          the sound this cart owns
-      `-- data/            anything else the cart loads
+      |-- app/mine.rb      the cart itself: defines class Mine
+      |-- sprites/         images; sprites/ship.png is drawn as :ship
+      |-- sounds/          sound effects and music
+      `-- data/            anything else the cart reads
     TREE
-    rule: "Name your class after the folder. The console looks for the folder " \
-          "name camelized, so `carts/mine/app/mine.rb` can define `Mine` or " \
-          "`CartMine`."
+    rule: "Name the class after the folder: `carts/mine` needs a class called " \
+          "`Mine` (or `CartMine`). The entry file is `app/mine.rb` or " \
+          "`app/main.rb`, and any other `.rb` files in `app/` are loaded too."
   }.freeze
 
   # The hooks a cart may implement. All of them are optional, which is the
@@ -60,27 +60,26 @@ class ConsoleGuide
   # Ordered by when they run, which is the order a reader meets them.
   HOOKS = [
     { name: "self.assets", when: "before boot",
-      note: "Names the art the cart owns. Declaring it lets the site check the " \
-            "cart at upload time and tell you a sprite is missing before anyone " \
-            "plays it." },
+      note: "Declaring the cart's files, under `sprites:`, `sounds:` and `music:`. " \
+            "Sounds and music only play if they are declared here. Sprites in " \
+            "`sprites/` are found by file name, so list one only to give it a " \
+            "shorter name." },
     { name: "self.sprite_library", when: "before boot",
-      note: "A map of sprite names to paths, for a cart with lots of sprites and " \
-            "nothing else to declare." },
+      note: "Declaring sprites on their own: the same as `sprites:` in `assets`." },
     { name: "self.sound_library", when: "before boot",
-      note: "The same, for sounds." },
+      note: "Declaring sounds on their own: the same as `sounds:` in `assets`." },
     { name: "setup", when: "once, at boot",
-      note: "Build your state here. Spawn what you need and load a level." },
+      note: "Setting up the starting state: variables, entities and scenes." },
     { name: "update", when: "every frame",
-      note: "Move things and read the input. Only used when the cart defines no " \
-            "scenes." },
+      note: "Reading input and moving things. Not called once the cart has scenes." },
     { name: "render", when: "every frame, last",
-      note: "Draws after the current scene, so this is where a HUD that persists " \
-            "across scenes belongs." },
-    { name: "enter", when: "on entering a scene",
-      note: "A scene's own setup. `scene_data` keeps its values between visits, " \
-            "so a scene that wants a clean start clears it here." },
-    { name: "leave", when: "on leaving a scene",
-      note: "A scene's own teardown, for stopping what it started." }
+      note: "Drawing. It runs after everything else, including the current " \
+            "scene, so it is also the place for a HUD." },
+    { name: "enter", when: "when a scene starts",
+      note: "Setting up a scene each time it starts. `scene_data` keeps its " \
+            "values between visits, so clear it here if the scene should start fresh." },
+    { name: "leave", when: "when a scene ends",
+      note: "Tidying up after a scene: stopping anything it started, such as music." }
   ].freeze
 
   # The API reference, grouped by what a reader is trying to do.
@@ -94,19 +93,19 @@ class ConsoleGuide
       slugs: %w[cart_loader core assets] },
     { title: "Drawing", note: "Putting things on the screen.",
       slugs: %w[draw sprites animation palette geom] },
-    { title: "Input", note: "Keyboard, gamepad and pointer, as one vocabulary.",
+    { title: "Input", note: "Keyboard, gamepad and pointer, through one set of actions.",
       slugs: %w[input] },
-    { title: "Scenes and entities", note: "The things in a game, and the states it is in.",
+    { title: "Scenes and entities", note: "The objects in a game, and the states it moves between.",
       slugs: %w[scene entity] },
-    { title: "The world", note: "The camera, the levels and the bodies they move through.",
+    { title: "The world", note: "The camera, levels, and the bodies that move through them.",
       slugs: %w[camera map body] },
-    { title: "Motion", note: "Interpolation, and work that reschedules itself.",
+    { title: "Motion", note: "Tweening, and timers that repeat.",
       slugs: %w[tween] },
-    { title: "Sound", note: "Music and effects.",
+    { title: "Sound", note: "Music and sound effects.",
       slugs: %w[audio] },
-    { title: "Interface", note: "Widgets, drawn through the draw helpers.",
+    { title: "Interface", note: "Widgets, built on the drawing helpers.",
       slugs: %w[ui] },
-    { title: "Text", note: "String helpers, for a runtime without Regexp.",
+    { title: "Text", note: "String helpers, since the runtime has no Regexp.",
       slugs: %w[str] },
     { title: "Testing", note: "Tests that run inside the real runtime.",
       slugs: %w[testing] },
@@ -121,11 +120,13 @@ class ConsoleGuide
   # written down once.
   PUBLISHING = {
     steps: [
-      "Download the console. Signed in, the download arrives with a key in " \
-        "dragonstation.json beside the library.",
-      "Build a cart. ./bin/run --cart arcade boots it locally.",
-      "Send it with ./bin/publish-site arcade. It arrives here as a draft under your account.",
-      "Play it, then publish it from the cart's page."
+      "Download the console while signed in. The download includes your " \
+        "publishing key, in `dragonstation.json`.",
+      "Run your cart locally with `./bin/run mine` until you are happy with it.",
+      "Check it with `./bin/publish-site mine --dry-run`. This runs the same " \
+        "checks as the site without sending anything.",
+      "Send it with `./bin/publish-site mine`. It shows up here as a private draft.",
+      "Play it here, then publish it from the cart's page."
     ],
     endpoint: [
       "POST /api/carts",
@@ -133,10 +134,10 @@ class ConsoleGuide
       "archive=<the cart ZIP, as multipart/form-data>",
       "",
       "201 {\"slug\",\"title\",\"status\":\"draft\",\"url\",...}",
-      "401 {\"error\":\"unauthorised\"}          a key that is not yours, or one a newer download replaced",
-      "422 {\"error\":...,\"problems\":[...]}    the refusals below, one per line",
-      "400 {\"error\":\"no archive\"}             nothing was sent",
-      "503 {\"error\":\"no console library ...\"} nothing to pin the cart to"
+      "401 {\"error\":\"unauthorised\"}          an unknown key, or one replaced by a newer download",
+      "422 {\"error\":...,\"problems\":[...]}    the archive was rejected; one problem per entry",
+      "400 {\"error\":\"no archive\"}             no archive was sent",
+      "503 {\"error\":\"no console library ...\"} no console version to pin the cart to"
     ].freeze
   }.freeze
 
@@ -158,11 +159,11 @@ class ConsoleGuide
     @primer ||= [
       Topic.new(
         title: "Comments",
-        prose: "A line that starts with `#` is a comment, and runs to the end of " \
-               "the line. The console reads your file but never runs a comment, " \
-               "so they are worth writing.",
+        prose: "Everything after a `#` is a comment, up to the end of the line. " \
+               "Comments are ignored when the cart runs, so use them freely to " \
+               "explain your code.",
         code: <<~'RUBY'
-          # The cart's title, shown on the page.
+          # The name this site shows for the cart.
           TITLE = 'mine'
 
           # A comment can also sit at the end of a line.
@@ -171,14 +172,14 @@ class ConsoleGuide
       ),
       Topic.new(
         title: "Values",
-        prose: "You will meet four kinds of value: numbers, strings, symbols and " \
-               "booleans. `nil` is the absence of a value. It and `false` are the " \
-               "only things that count as false, so `0` and the empty string are " \
-               "both true.",
+        prose: "You will mostly work with four kinds of value: numbers, strings, " \
+               "symbols and booleans. `nil` means no value at all. Only `nil` and " \
+               "`false` count as false; everything else, including `0` and the " \
+               "empty string, counts as true.",
         code: <<~'RUBY'
           400.0            # a number
           'text'           # a string
-          "text #{400}"    # a string with a value put into it
+          "text #{400}"    # a string with a value inserted
           :right           # a symbol
           true             # a boolean
           nil              # no value at all
@@ -186,58 +187,67 @@ class ConsoleGuide
       ),
       Topic.new(
         title: "Variables and constants",
-        prose: "A name starting with a lowercase letter is a local variable, and " \
-               "belongs to the method it is written in. A name starting with an " \
-               "uppercase letter is a constant, and Ruby complains if you assign " \
-               "to one twice. A name starting with `@` is an instance variable, " \
-               "which belongs to the cart and survives between frames.",
+        prose: "A name starting with a lowercase letter is a local variable; it " \
+               "exists only inside the method where it is written. A name starting " \
+               "with an uppercase letter is a constant, and Ruby warns you if you " \
+               "assign to it twice. A name starting with `@` is an instance " \
+               "variable: it belongs to the cart and keeps its value between frames.",
         code: <<~'RUBY'
           def setup
             @x = 400.0        # an instance variable: it belongs to the cart
-            speed = 4         # a local variable: it belongs to this method
+            speed = 4         # a local variable: it only exists in this method
           end
         RUBY
       ),
       Topic.new(
         title: "Conditionals",
-        prose: "`if` runs a block when something is true, `unless` runs it when " \
-               "something is false, and `elsif` chains more cases. `else` catches " \
-               "whatever is left.",
+        prose: "`if` runs code when a condition is true, and `unless` runs it when " \
+               "a condition is false. `elsif` adds more cases, and `else` handles " \
+               "anything left over.",
         code: <<~'RUBY'
           if input.held?(:right)
             @x += 4
           elsif input.held?(:left)
             @x -= 4
           else
-            @x = 400.0
+            @speed = 0
           end
 
-          @x = 0 unless @dead
+          # Either form also works at the end of a single line.
+          @lives -= 1 unless @shielded
+          @score += 10 if @hit
         RUBY
       ),
       Topic.new(
         title: "Loops",
-        prose: "`while` repeats until its condition goes false. `each` walks a " \
-               "collection, and `times` counts. `break` leaves a loop early.",
+        prose: "`while` repeats for as long as its condition is true. `each` runs " \
+               "once for every item in a collection, and `times` runs a set number " \
+               "of times. `break` exits a loop early.",
         code: <<~'RUBY'
-          i = 0
-          while i < 3
-            i += 1
+          # while: repeat as long as the condition holds
+          fuel = 3
+          while fuel > 0
+            fuel -= 1
           end
 
-          [1, 2, 3].each do |n|
-            draw.text 'tick', x: 10, y: 10
+          # each: once for every item, which arrives as points
+          total = 0
+          [10, 20, 30].each do |points|
+            total += points
           end
 
-          3.times { |n| spawn :enemy, x: n * 100, y: 200 }
+          # times: a fixed number of times, counting from 0
+          3.times do |n|
+            spawn :enemy, x: 100 + (n * 100), y: 200
+          end
         RUBY
       ),
       Topic.new(
         title: "Methods",
-        prose: "`def` starts a method and `end` finishes it. A method returns the " \
+        prose: "`def` starts a method and `end` closes it. A method returns the " \
                "value of its last expression, or whatever you pass to `return`. A " \
-               "block is a chunk of code you hand to a method, written with braces " \
-               "or with `do` and `end`.",
+               "block is a chunk of code passed to a method, written between braces " \
+               "or between `do` and `end`. The method decides when the block runs.",
         code: <<~'RUBY'
           def limit_to(value, low, high)
             return low if value < low
@@ -245,34 +255,44 @@ class ConsoleGuide
             value
           end
 
+          def update
+            @x = limit_to(@x + 4, 0, 800)
+          end
+
+          # A block: every runs the code between do and end once a second.
           def setup
-            @x = limit_to(@x, 0, 800)
+            @seconds = 0
+            every 60 do
+              @seconds += 1
+            end
           end
         RUBY
       ),
       Topic.new(
         title: "Hashes and arrays",
-        prose: "An array is a list. A hash is a set of key and value pairs. The " \
-               "console's API is built on hashes with symbol keys, which is why " \
-               "you will see options like `x:` and `y:` so often.",
+        prose: "An array is an ordered list. A hash is a collection of key-value " \
+               "pairs. The console's API uses hashes with symbol keys throughout, " \
+               "which is why you will see options like `x:` and `y:` so often.",
         code: <<~'RUBY'
           # An array
           @shots = []
-          @shots << { x: 100, y: 200 }
+          @shots << { x: 100, y: 200 }   # add to the end
+          @shots[0]                      # the first item
 
           # A hash
           entity = { x: 100, y: 200, sprite: :ship }
-          entity[:x]        # 100
-          entity.key?(:x)   # true
-          entity.merge(y: 300)
+          entity[:x]             # 100
+          entity[:x] = 150       # change a value
+          entity.key?(:y)        # true
+          entity.merge(y: 300)   # a copy with y changed; entity is untouched
         RUBY
       ),
       Topic.new(
         title: "Symbols",
-        prose: "A symbol is a name, written with a leading colon. The API asks " \
-               "you to name everything with one: a sprite, a button, a colour, an " \
-               "action. A symbol is cheaper than a string and always means the same " \
-               "thing.",
+        prose: "A symbol is a name written with a leading colon. The API uses " \
+               "symbols to name everything: sprites, buttons, colours, actions. " \
+               "Symbols are cheaper than strings, and a given symbol is always the " \
+               "same object.",
         code: <<~'RUBY'
           input.held?(:right)      # a button
           draw.sprite path: :ship  # a sprite name
@@ -281,17 +301,19 @@ class ConsoleGuide
       ),
       Topic.new(
         title: "Classes",
-        prose: "Your cart is a class. Its name comes from the folder it lives in, " \
-               "and the console makes one of them for you at boot. Methods written " \
-               "inside it are instance methods, and they are the hooks the runtime " \
-               "calls. `self.` in front of a method makes it a class method, and " \
-               "that is how a cart declares its assets.",
+        prose: "Your cart is a class, named after the folder it lives in, and the " \
+               "console creates an instance of it at boot. Methods defined inside " \
+               "the class are instance methods; these are the hooks the console " \
+               "calls. Putting `self.` in front of a method name makes it a class " \
+               "method, which is how a cart declares its assets.",
         code: <<~'RUBY'
           class Mine
+            # A class method: the console calls it before boot.
             def self.assets
-              { sprites: { ship: 'sprites/ship.png' } }
+              { sounds: { jump: 'sounds/jump.wav' } }
             end
 
+            # An instance method: a hook the console calls on your cart.
             def setup
               @x = 400.0
             end
@@ -310,63 +332,90 @@ class ConsoleGuide
     @structure ||= [
       Topic.new(
         title: "What happens at boot",
-        prose: "The console requires your file, finds the class, registers the art " \
-               "you declared, and then calls `setup`. The input is sampled before " \
-               "`setup` runs, so your cart can read the keyboard and the pointer " \
-               "from the very first line of it.",
+        prose: "Before your code runs, the console finds your class, indexes your " \
+               "sprites and registers what you declared in `self.assets`. Then it " \
+               "calls `setup`, once.",
         list: [
-          "Your file is required, and the class is found by name.",
-          "The sprites and sounds you declared are registered.",
-          "The input is sampled, so `setup` can read it.",
+          "Your entry file is loaded, then every other `.rb` file in `app/`.",
+          "Your class is found by name, and one instance of it is created.",
+          "Every image in `sprites/` is indexed by file name, and the files " \
+            "named in `self.assets` are registered.",
+          "Input is read once, so `setup` can already check the keyboard and pointer.",
           "`setup` runs.",
-          "If you declared any scenes, the first one you declared is entered."
+          "If `setup` declared any scenes, the first one is entered."
         ]
       ),
       Topic.new(
         title: "The frame",
-        prose: "The console ticks 60 times a second. Each tick updates the " \
-               "schedulers, then either runs your scene or your cart, and then " \
-               "draws. The order matters if you are not sure where something " \
-               "belongs.",
+        prose: "After boot, the console runs 60 frames a second, and every frame " \
+               "follows the same steps in the same order. When you are not sure " \
+               "where some code belongs, find its step here.",
         list: [
-          "`after`, `every`, tweens and animations are advanced.",
+          "Input is read. Every check in this frame sees the same keys.",
+          "`after` and `every` timers fire, tweens and animations advance, and " \
+            "a camera that is following something moves.",
           "With no scenes: your `update` runs, then your `render`.",
-          "With scenes: the current scene's `update` runs, then its `render`.",
-          "With scenes: your `render` runs last, over the top of the scene."
+          "With scenes: the current scene's `update` runs, then its `render`, " \
+            "then your cart's `render` on top.",
+          "A scene change asked for during the frame happens at the end of it."
         ]
       ),
       Topic.new(
+        title: "Screen, coordinates and colours",
+        prose: "The screen is `screen[:w]` by `screen[:h]` pixels (1280 by 720). " \
+               "`x` counts from the left and `y` counts up from the bottom, so " \
+               "adding to `y` moves something up. `top(n)` converts a distance " \
+               "from the top into a `y`. Colours are named: `:white`, `:black`, " \
+               "`:gray`, `:dark`, `:panel`, `:accent`, `:accent2`, `:good`, " \
+               "`:warn`, `:bad`, `:text` and `:muted`.",
+        code: <<~'RUBY'
+          # A 32-pixel square in the bottom-left corner...
+          draw.rect x: 0, y: 0, w: 32, h: 32, color: :accent
+
+          # ...and one in the top-right corner.
+          draw.rect x: screen[:w] - 32, y: top(32), w: 32, h: 32, color: :bad
+        RUBY
+      ),
+      Topic.new(
         title: "Scenes",
-        prose: "A scene is a class with `enter`, `update` and `render`. You declare " \
-               "one with two arguments and jump to it with one, which is worth " \
-               "knowing before you go looking for a `scene` method that only " \
-               "declares.",
+        prose: "A scene is a class with any of `enter`, `update`, `render` and " \
+               "`leave`. Declare one by calling `scene` with a name and a class, " \
+               "and switch to it with `goto`. Scenes can call everything a cart " \
+               "can: `draw`, `input`, `spawn` and the rest.",
         code: <<~'RUBY'
           def setup
-            scene :title, TitleScene   # declares it
+            scene :title, TitleScene   # declares a scene
             scene :play, PlayScene
           end
 
+          # Inside TitleScene:
           def update
-            goto :play if input.pressed?(:accept)   # jumps to it
+            goto :play if input.pressed?(:accept)   # switches to it
           end
         RUBY
       ),
       Topic.new(
         title: "Quirks",
-        prose: "The things that are true of the console and not obvious from the " \
-               "API reference.",
+        prose: "Things that catch people out, and are hard to spot in the API reference.",
         list: [
-          "The first scene you declare starts by itself. You do not need to `goto` it.",
-          "`goto` restarts a scene and runs its `enter` again. `pop_scene` goes back " \
-            "without, which is the difference between restarting and resuming.",
-          "`scene_data` keeps its values between visits to the same scene.",
-          "Your `update` only runs when your cart has no scenes. With scenes, the " \
-            "scene's `update` runs instead.",
-          "Your `render` runs last, so a HUD that has to sit over a scene belongs there.",
-          "`scene :title` with one argument jumps. It takes two to declare.",
-          "A `push_scene` overlay pauses `after`, `every` and the tweens as well as " \
-            "the entities, so the world really does stop."
+          "The first scene you declare starts automatically; you do not need to `goto` it.",
+          "Once a cart declares a scene, its own `update` is never called. Put " \
+            "game logic in the scenes, and use the cart's `render` for a HUD that " \
+            "shows in every scene.",
+          "`goto` restarts a scene from scratch: a new instance, so its instance " \
+            "variables are gone, and `enter` runs again. Keep anything that should " \
+            "survive in `scene_data`, which keeps its values between visits.",
+          "`pop_scene` goes back to the scene underneath without calling its " \
+            "`enter`, so that scene carries on where it left off.",
+          "While a `push_scene` overlay is up, the scene underneath stops updating, " \
+            "and `after`, `every`, tweens and animations pause with it.",
+          "`scene :title` with one argument switches to that scene, like `goto`. " \
+            "Declaring a scene takes two arguments.",
+          "Sounds and music are only found if they are declared in `self.assets`. " \
+            "Sprites in `sprites/` are found by file name without being declared.",
+          "A sprite name that does not resolve does not crash the cart: it draws " \
+            "as a plain white box, or not at all if you gave it no size. If a " \
+            "sprite is missing, check its file name first."
         ]
       )
     ].freeze
@@ -391,8 +440,13 @@ class ConsoleGuide
   end
 
   # The samples, in the order a first cart meets them.
+  #
+  # Each one is a whole cart rather than a fragment to add: every sample
+  # defines `setup`, `update` and `render`, and pasting a second `def setup`
+  # into a file silently replaces the first. A complete file is the one thing a
+  # reader can copy, run, and trust.
   def samples
-    @samples ||= [ first_cart, scenes, no_art_yet, moving_and_animating, sound_and_timing ].freeze
+    @samples ||= [ first_cart, no_art_yet, scenes, moving_and_animating, sound_and_timing ].freeze
   end
 
   def find(id) = samples.find { |s| s.id == id }
@@ -401,68 +455,35 @@ class ConsoleGuide
     def first_cart
       Sample.new(
         id: "first-cart",
-        title: "The smallest cart that moves",
-        note: "One class in one file. Paths are relative to the folder, so " \
-              "`sprites/ship.png` means a file inside this cart.",
+        title: "A square you can move",
+        note: "`setup` runs once, when the cart starts. `update` runs every frame " \
+              "to change things, and `render` runs after it to draw them. " \
+              "`input.held?` is true for as long as a direction is held, on the " \
+              "arrow keys, WASD or a gamepad. Remember that `y` counts up from " \
+              "the bottom of the screen.",
         file: "carts/mine/app/mine.rb",
         verb: "Create",
         code: <<~'RUBY'
           TITLE = 'mine'
 
           class Mine
-            def self.assets
-              { sprites: { ship: 'sprites/ship.png' } }
-            end
+            SPEED = 4
 
             def setup
-              @x = 400.0
+              @x = 600.0
+              @y = 340.0
             end
 
             def update
-              @x += 4 if input.held?(:right)
-              @x -= 4 if input.held?(:left)
+              @x += SPEED if input.held?(:right)
+              @x -= SPEED if input.held?(:left)
+              @y += SPEED if input.held?(:up)
+              @y -= SPEED if input.held?(:down)
             end
 
             def render
-              draw.sprite path: :ship, x: @x, y: 300
-            end
-          end
-        RUBY
-      )
-    end
-
-    def scenes
-      Sample.new(
-        id: "scenes",
-        title: "Splitting it into scenes",
-        note: "A cart with scenes gets `enter`, `update` and `render` for each " \
-              "scene, rather than the cart's own `update`. `scene_data` holds " \
-              "state for that scene, and it survives leaving it.",
-        file: "carts/mine/app/mine.rb",
-        verb: "Add to",
-        code: <<~'RUBY'
-          class Mine
-            def setup
-              scene :title, TitleScene
-              scene :play, PlayScene
-              goto :title
-            end
-          end
-
-          class TitleScene
-            def enter
-              scene_data[:t] = 0
-            end
-
-            def update
-              goto :play if input.pressed?(:accept)
-            end
-
-            def render
-              draw.text 'PRESS SPACE',
-                        x: screen[:w] / 2.0, y: screen[:h] / 2.0,
-                        anchor_x: 0.5, anchor_y: 0.5,
-                        size_px: 32, color: :accent
+              draw.rect x: @x, y: @y, w: 32, h: 32, color: :accent
+              draw.text 'Arrow keys or WASD to move', x: 20, y: 20, color: :muted
             end
           end
         RUBY
@@ -472,22 +493,97 @@ class ConsoleGuide
     def no_art_yet
       Sample.new(
         id: "no-art-yet",
-        title: "Playable before any art exists",
-        note: "`auto_sprite` makes a texture for any name that has no file, and " \
-              "never overwrites one that does. The textures come out the same " \
-              "every time, so the same cart looks the same everywhere and can " \
-              "stand in for art until you make some.",
+        title: "Adding art, or a placeholder for it",
+        note: "Any image in the cart's `sprites/` folder can be drawn by its " \
+              "file name: `sprites/ship.png` is `:ship`. Until you have art, " \
+              "`auto_sprite` generates a placeholder under that name. It never " \
+              "replaces a real file, so you can leave the line in: once " \
+              "`sprites/ship.png` exists, it is drawn instead. The last argument " \
+              "picks a pattern: `:solid`, `:checker`, `:stripes`, `:frame`, " \
+              "`:circle` or `:ring`.",
         file: "carts/mine/app/mine.rb",
-        verb: "Add to",
+        verb: "Replace the contents of",
         code: <<~'RUBY'
-          def setup
-            auto_sprite :ship, 16, 16, :accent, :frame
-            auto_sprite :star, 8, 8, :warn, :circle
+          TITLE = 'mine'
+
+          class Mine
+            SPEED = 4
+
+            def setup
+              @x = 600.0
+              @y = 340.0
+              # Stands in for sprites/ship.png until that file exists.
+              auto_sprite :ship, 32, 32, :accent, :frame
+            end
+
+            def update
+              @x += SPEED if input.held?(:right)
+              @x -= SPEED if input.held?(:left)
+              @y += SPEED if input.held?(:up)
+              @y -= SPEED if input.held?(:down)
+            end
+
+            def render
+              draw.sprite path: :ship, x: @x, y: @y, w: 32, h: 32
+              draw.text 'Arrow keys or WASD to move', x: 20, y: 20, color: :muted
+            end
+          end
+        RUBY
+      )
+    end
+
+    def scenes
+      Sample.new(
+        id: "scenes",
+        title: "A title screen, with scenes",
+        note: "Each scene is its own class with `enter`, `update` and `render`. " \
+              "The first scene declared starts by itself, and from then on the " \
+              "console runs the current scene instead of the cart's own `update`. " \
+              "`goto` starts a scene from scratch, which is why `@x` is back in " \
+              "the middle on every play. `scene_data` is the one thing a scene " \
+              "keeps between visits, so the play count survives.",
+        file: "carts/mine/app/mine.rb",
+        verb: "Replace the contents of",
+        code: <<~'RUBY'
+          TITLE = 'mine'
+
+          class Mine
+            def setup
+              scene :title, TitleScene   # declared first, so it starts first
+              scene :play, PlayScene
+            end
           end
 
-          def render
-            draw.sprite path: :star, x: 120, y: 200
-            draw.sprite path: :ship, x: 260, y: 200
+          class TitleScene
+            def update
+              goto :play if input.pressed?(:accept)   # Space, Enter or gamepad A
+            end
+
+            def render
+              draw.text 'PRESS SPACE TO START',
+                        x: screen[:w] / 2.0, y: screen[:h] / 2.0,
+                        anchor_x: 0.5, anchor_y: 0.5,
+                        size_px: 32, color: :accent
+            end
+          end
+
+          class PlayScene
+            def enter
+              @x = 600.0
+              scene_data[:plays] = (scene_data[:plays] || 0) + 1
+            end
+
+            def update
+              @x += 4 if input.held?(:right)
+              @x -= 4 if input.held?(:left)
+              goto :title if input.pressed?(:cancel)   # Esc or gamepad B
+            end
+
+            def render
+              draw.rect x: @x, y: 340, w: 32, h: 32, color: :accent
+              draw.text "Play #{scene_data[:plays]}. Esc for the title screen.",
+                        x: 20, y: 20, color: :muted
+            end
           end
         RUBY
       )
@@ -496,31 +592,46 @@ class ConsoleGuide
     def moving_and_animating
       Sample.new(
         id: "moving",
-        title: "Entities, animation and a camera",
-        note: "An entity is a hash you own. `animate` plays a numbered " \
-              "directory of frames from the cart's sprites, and the camera " \
-              "clamps itself to the world rectangle you give it.",
+        title: "A world bigger than the screen",
+        note: "`spawn` creates an entity: a plain hash with `x`, `y`, `w`, `h` " \
+              "and a `kind`, here `:hero`. `animate` plays the numbered frames " \
+              "in `sprites/hero/run/` (`0.png`, `1.png` and so on), and " \
+              "`draw_entity` draws whichever frame is current. With no frames " \
+              "yet, it draws the `:hero` placeholder instead. The camera follows " \
+              "the hero by itself, but it only moves what is drawn inside " \
+              "`camera.apply`. Anything drawn outside it, like the text here, " \
+              "stays put on the screen.",
         file: "carts/mine/app/mine.rb",
-        verb: "Add to",
+        verb: "Replace the contents of",
         code: <<~'RUBY'
-          WORLD = { x: 0, y: 0, w: 1600, h: 900 }
+          TITLE = 'mine'
 
-          def setup
-            @ship = spawn :ship, kind: :hero, x: 800, y: 120,
-                           w: 28, h: 28, sprite: :ship
-            animate @ship, :run, fps: 12
-            camera.follow @ship
-            camera.bounds = WORLD
-          end
+          class Mine
+            # Two screens wide. The camera never shows past these edges.
+            WORLD = { x: 0, y: 0, w: 2560, h: 720 }
 
-          def update
-            @ship[:x] += 3 if input.held?(:right)
-            @ship[:x] -= 3 if input.held?(:left)
-            camera.update
-          end
+            def setup
+              auto_sprite :hero, 32, 32, :accent, :frame
+              @hero = spawn :hero, x: 100, y: 200, w: 32, h: 32
+              animate @hero, :run, fps: 12
+              camera.follow @hero
+              camera.bounds = WORLD
+            end
 
-          def render
-            draw.sprite path: @ship[:sprite], x: @ship[:x], y: @ship[:y]
+            def update
+              @hero[:x] += 4 if input.held?(:right)
+              @hero[:x] -= 4 if input.held?(:left)
+            end
+
+            def render
+              camera.apply do
+                draw.rect x: 0, y: 0, w: WORLD[:w], h: 200, color: :panel   # the ground
+                draw.rect x: 1200, y: 200, w: 64, h: 64, color: :warn       # a crate
+                draw_entity @hero
+              end
+
+              draw.text 'Walk right to scroll', x: 20, y: 20, color: :muted
+            end
           end
         RUBY
       )
@@ -529,27 +640,50 @@ class ConsoleGuide
     def sound_and_timing
       Sample.new(
         id: "sound",
-        title: "Sound, and work that reschedules itself",
-        note: "Music is one track; effects are fire-and-forget. `every` runs a " \
-              "block every N frames, which is enough for spawners, timers and " \
-              "cooldowns without coroutines.",
+        title: "Sound, and things that happen on a timer",
+        note: "Unlike sprites, sounds have to be declared in `self.assets`: " \
+              "`sounds:` for effects and `music:` for tracks. `sfx` plays an " \
+              "effect once. `music` loops a track, and calling it with another " \
+              "name swaps tracks. `every 90` runs its block every 90 frames (one " \
+              "and a half seconds), and `immediate: true` runs it straight away " \
+              "too. The site refuses an upload whose code names a file the cart " \
+              "does not include, so add `sounds/laser.wav` and `sounds/theme.ogg` " \
+              "before you publish.",
         file: "carts/mine/app/mine.rb",
-        verb: "Add to",
+        verb: "Replace the contents of",
         code: <<~'RUBY'
-          def setup
-            music :theme
-            every 90, immediate: true do
-              next_wave
+          TITLE = 'mine'
+
+          class Mine
+            def self.assets
+              { sounds: { laser: 'sounds/laser.wav' },
+                music: { theme: 'sounds/theme.ogg' } }
             end
-          end
 
-          def update
-            sfx :laser if input.pressed?(:accept)
-          end
+            def setup
+              auto_sprite :enemy, 24, 24, :bad, :circle
+              music :theme
 
-          def next_wave
-            spawn :enemy, kind: :foe, x: 800, y: 900, w: 24, h: 24,
-                          sprite: :enemy, dx: -1
+              # A new enemy at the right edge, every 90 frames.
+              every 90, immediate: true do
+                spawn :enemy, x: screen[:w], y: rand_int(40, screen[:h] - 64),
+                              w: 24, h: 24
+              end
+            end
+
+            def update
+              sfx :laser if input.pressed?(:accept)
+
+              each_entity :enemy do |enemy|
+                move enemy, vx: -3
+                despawn enemy if enemy[:x] < -24   # gone off the left edge
+              end
+            end
+
+            def render
+              each_entity(:enemy) { |enemy| draw_entity enemy }
+              draw.text 'Space to fire', x: 20, y: 20, color: :muted
+            end
           end
         RUBY
       )
