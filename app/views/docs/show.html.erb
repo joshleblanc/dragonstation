@@ -14,20 +14,34 @@
       <%= @module.named_modules.drop(1).map { |n| tag.code(n) }.join(", ").html_safe %>
     </p>
   <% end %>
+  <p class="muted">
+    <%= link_to "back to the API index", docs_path %>
+  </p>
 </div>
 
 <% if @module.error %>
   <p class="flash flash-alert">This module could not be read: <%= @module.error %></p>
 <% else %>
+  <%# A module with several sections is a long page, and the sections are the
+      library's own -- so the way into them is a list of them. %>
+  <% if @module.sections.size > 1 %>
+    <nav class="doc-nav" aria-label="On this page">
+      <% @module.sections.each do |section| %>
+        <% next if section.title.blank? %>
+        <%= link_to section.title, "##{section.anchor}" %>
+      <% end %>
+    </nav>
+  <% end %>
+
   <%= doc_blocks(@module.summary_doc) %>
 
   <% @module.sections.each do |section| %>
-    <section class="doc-section">
+    <section class="doc-section" id="<%= section.anchor %>">
       <% if section.title.present? %><h2><%= section.title %></h2><% end %>
 
       <dl class="doc-methods">
         <% section.methods.each do |method| %>
-          <div class="doc-method" id="<%= method.name %>">
+          <div class="doc-method" id="<%= @module.anchor_for(method) %>">
             <dt><code class="doc-signature"><%= raw signature_markup(method.signature) %></code></dt>
             <dd>
               <% if method.documented? %>
@@ -43,5 +57,19 @@
         <% end %>
       </dl>
     </section>
+  <% end %>
+
+  <%# The modules either side of this one, in the order the library requires
+      them: the order they build on each other, and so the order worth reading
+      them in. %>
+  <% if @neighbours[:previous] || @neighbours[:next] %>
+    <nav class="doc-pager">
+      <% if @neighbours[:previous] %>
+        <%= link_to "← #{@neighbours[:previous].name}", doc_path(@neighbours[:previous].slug) %>
+      <% end %>
+      <% if @neighbours[:next] %>
+        <%= link_to "#{@neighbours[:next].name} →", doc_path(@neighbours[:next].slug), class: "doc-pager-next" %>
+      <% end %>
+    </nav>
   <% end %>
 <% end %>

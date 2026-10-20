@@ -28,8 +28,9 @@ class DocsController < ApplicationController
   # them, under the library's own section headings.
   def show
     @module = @documentation.find(params[:slug])
+    return head :not_found unless @module
 
-    head :not_found unless @module
+    @neighbours = neighbours_for(@module)
   end
 
   # The library's source for one module.
@@ -53,5 +54,21 @@ class DocsController < ApplicationController
       return head :not_found unless @console_version&.available?
 
       @documentation = ConsoleDocumentation.new(@console_version)
+    end
+
+    # The modules either side of this one, in require order.
+    #
+    # Require order is the order the modules build on each other, so it is the
+    # order worth reading them in, and it is the order a reader who came in
+    # through one module is most likely to want the next one in.
+    def neighbours_for(console_module)
+      modules = @documentation.modules
+      index = modules.index { |m| m.slug == console_module.slug }
+      return {} unless index
+
+      {
+        previous: index.positive? ? modules[index - 1] : nil,
+        next: index + 1 < modules.size ? modules[index + 1] : nil
+      }
     end
 end

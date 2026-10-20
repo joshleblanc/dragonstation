@@ -61,4 +61,30 @@ class DocsHelperTest < ActionView::TestCase
     assert_equal "", doc_blocks([]).strip
     assert_equal "", doc_blocks([ "", "   " ]).strip
   end
+
+  # The index shows a module's name in one column and its summary in the next.
+  # The library's summaries open with the module's own name, so the same word
+  # lands in both columns and the part worth reading is squeezed out.
+  test "a summary does not repeat the module's own name" do
+    mod = ConsoleDocumentation::Module.new(
+      slug: "draw", path: "app/console/draw.rb",
+      module_names: [ "Console::Draw" ], summary: "Console::Draw -- the rendering helper layer.",
+      summary_doc: [], sections: [], line_count: 1, error: nil
+    )
+
+    assert_equal "the rendering helper layer.", doc_summary(mod)
+  end
+
+  # When the library's comment names something other than the module defines,
+  # the difference is worth seeing rather than tidying away: it is the library
+  # that is inconsistent, not the index.
+  test "a summary that names a different module keeps its prefix" do
+    mod = ConsoleDocumentation::Module.new(
+      slug: "animation", path: "app/console/animation.rb",
+      module_names: [ "Console::Frame" ], summary: "Console::Animation -- sprite animation.",
+      summary_doc: [], sections: [], line_count: 1, error: nil
+    )
+
+    assert_equal "Console::Animation -- sprite animation.", doc_summary(mod)
+  end
 end

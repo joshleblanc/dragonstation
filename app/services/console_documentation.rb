@@ -14,7 +14,11 @@ class ConsoleDocumentation
   end
 
   # A group of methods under one of the library's `# --- heading ---` dividers.
-  Section = Struct.new(:title, :methods, keyword_init: true)
+  #
+  # `anchor` is the id it is linked by. It is assigned when the sections are
+  # built, because uniqueness is a property of the whole module and not of one
+  # section.
+  Section = Struct.new(:title, :methods, :anchor, keyword_init: true)
 
   Module = Struct.new(:slug, :path, :module_names, :summary, :summary_doc, :sections,
                       :line_count, :error, keyword_init: true) do
@@ -22,6 +26,31 @@ class ConsoleDocumentation
 
     # File names do not match module names (animation.rb defines Console::Anim).
     def name = named_modules.first || slug
+
+    # A method's anchor, unique on the page.
+    #
+    # Several modules define a method more than once -- `update` in animation.rb
+    # and tween.rb, `initialize` in three of them -- and two elements sharing
+    # an id is invalid HTML, and a link to it jumps to the first and stops
+    # there. So the second is numbered.
+    def anchor_for(method)
+      anchors.fetch(method, method.name)
+    end
+
+    def anchors
+      @anchors ||= begin
+        counts = Hash.new(0)
+        sections.flat_map(&:methods).each_with_object({}) do |method, map|
+          counts[method.name] += 1
+          map[method] =
+            if counts[method.name] == 1
+              method.name
+            else
+              "#{method.name}-#{counts[method.name]}"
+            end
+        end
+      end
+    end
   end
 
   # Prose, or a usage sample: the library marks samples by indenting them.
@@ -42,7 +71,7 @@ class ConsoleDocumentation
   CONTINUED = /\\\s*\z/
 
   # Bump when the extraction changes: the cache outlives deploys.
-  CACHE_SALT = "v1"
+  CACHE_SALT = "v2"
   CACHE_TTL = 7.days
 
   # A comment split into prose and code blocks. A block is code only if every
@@ -150,16 +179,55 @@ class ConsoleDocumentation
       lines = source.lines
       comments = comments_by_line(source, lines.size)
       header = header_comment(lines, comments)
+      sections = sections_of(lines, comments, sexp)
+      anchor_sections(sections)
 
       Module.new(
         slug: File.basename(path, ".rb"),
         path: path,
         module_names: module_names(sexp),
-        summary: header.map { |l| l.sub(/\A#\s?/, "").strip }.find(&:present?),
+        summary: summary_of(header),
         summary_doc: header,
-        sections: sections_of(lines, comments, sexp),
+        sections: sections,
         line_count: lines.size
       )
+    end
+
+    # The one line that says what a module is for.
+    #
+    # The header's first paragraph, reflowed and cut at the end of its first
+    # sentence. Reading the first source line instead would cut a wrapped
+    # header in half -- "Console::Input -- one action vocabulary across
+    # keyboard, controller and" is not a summary of anything -- and the index
+    # is where a reader decides whether to open the page.
+    def summary_of(header)
+      prose = ConsoleDocumentation.blocks(header).find { |block| !block.code? }
+      return nil if prose.nil?
+
+      prose.text.split(/(?<=\.)\s+/).first.presence
+    end
+
+    # A section's anchor is its title, slugged, and unique on the page: two
+    # sections with the same title would otherwise share an id. The first
+    # section of a module usually has no title at all, so it falls back to its
+    # position.
+    def anchor_sections(sections)
+      taken = []
+
+      sections.each_with_index do |section, index|
+        base = section.title.present? ? section.title.parameterize : "section-#{index + 1}"
+        base = "section-#{index + 1}" if base.blank?
+
+        anchor = base
+        n = 1
+        while taken.include?(anchor)
+          n += 1
+          anchor = "#{base}-#{n}"
+        end
+
+        taken << anchor
+        section.anchor = anchor
+      end
     end
 
     # From the parse tree, classes included: about half the library is classes.

@@ -44,9 +44,9 @@ class DocsControllerTest < ActionDispatch::IntegrationTest
   test "the guide says when each hook runs" do
     get docs_path
 
-    assert_select "#hooks", /setup/
+    assert_select "#structure", /setup/
     ConsoleGuide::HOOKS.each do |hook|
-      assert_select "#hooks td", text: /#{Regexp.escape(hook[:when])}/
+      assert_select "#structure td", text: /#{Regexp.escape(hook[:when])}/
     end
   end
 
@@ -127,6 +127,135 @@ class DocsControllerTest < ActionDispatch::IntegrationTest
     get doc_source_path("draw")
 
     assert_select "a[href=?]", doc_path("draw"), text: /back to/
+  end
+
+  # The page is a manual now, so it opens with its contents. A link to a section
+  # that is not on the page is a dead end.
+  test "the page opens with its contents, and every section is there" do
+    get docs_path
+
+    ConsoleGuide::SECTIONS.each_with_index do |section, i|
+      assert_select "nav.doc-toc a[href=?]", "##{section[:id]}", text: "#{i + 1}. #{section[:title]}"
+      assert_select "##{section[:id]}"
+    end
+  end
+
+  # The API reference is grouped by what a reader is looking for. Every module must
+  # still be linked exactly once: a module linked twice is two entries, and one
+  # linked not at all is a module that does not exist as far as the page goes.
+  test "the API reference is grouped, and every module is still linked once" do
+    get docs_path
+
+    assert_select ".doc-subsystem"
+    ConsoleVersion.default.library.require_paths.each do |path|
+      slug = File.basename(path, ".rb")
+      assert_select "a[href=?]", doc_path(slug), count: 1, message: "no link for #{slug}"
+    end
+  end
+
+  # The reference is on one page, so every method of the library is on one page.
+  # A reader looking for how to play a sound should not have to know which
+  # module it lives in first.
+  test "every method in the library is listed on the reference page" do
+    get docs_path
+
+    docs = ConsoleDocumentation.new(ConsoleVersion.default)
+
+    docs.modules.each do |mod|
+      mod.sections.flat_map(&:methods).each do |method|
+        assert_select "a[href=?]", doc_path(mod.slug, anchor: mod.anchor_for(method)),
+          count: 1, message: "no listing for #{mod.slug}##{method.name}"
+      end
+    end
+  end
+
+  # The guide's notes are written with identifiers in backticks, like the
+  # library's own comments. Rendered as plain text they put a literal backtick
+  # on the page around every method name in every sample.
+  test "a guide note renders its identifier as code, not as a literal backtick" do
+    get docs_path
+
+    assert_select ".doc-sample p.doc code", /auto_sprite/
+    assert_no_match(/`auto_sprite`/, response.body)
+  end
+
+  # The one rule about a cart that cannot be bent: the directory name is the
+  # class name. It is the thing a reader has to get right before anything else
+  # on the page works.
+  test "the page states the rule that names a cart" do
+    get docs_path
+
+    assert_select "#start", /app\/mine\.rb/
+    assert_select "#start p.doc code", /Mine/
+  end
+
+  # The console resolves a cart's class by trying the folder name, the folder
+  # name camelized, and the camelized name with a Cart prefix. Saying only
+  # "the folder name is the class name" would rule out a working cart.
+  test "the naming rule says which class names the console accepts" do
+    get docs_path
+
+    assert_select "#start p.doc code", /CartMine/
+  end
+
+  # A reader who knows some programming but not Ruby needs the language before
+  # the API, and the page is the only place that can teach it.
+  test "the page teaches the language and the cart's structure" do
+    get docs_path
+
+    assert_select "#primer .doc-topic", minimum: 8
+    assert_select "#structure .doc-topic", minimum: 4
+    assert_select "#structure .doc-table", /setup/
+  end
+
+  # A module page has to offer a way back, and a way onward: the API index is
+  # twenty modules, and arriving at one of them is not the end of the reading.
+  test "a module page links back to the API index and onward to its neighbours" do
+    slugs = ConsoleVersion.default.library.require_paths.map { |path| File.basename(path, ".rb") }
+    index = slugs.index("sprites")
+
+    get doc_path("sprites")
+
+    assert_select "a[href=?]", docs_path, text: /back to the API index/
+    assert_select ".doc-pager a[href=?]", doc_path(slugs[index - 1])
+    assert_select ".doc-pager a[href=?]", doc_path(slugs[index + 1])
+  end
+
+  # A module page is long, and its sections are the library's own, so the way
+  # into them is a list of them.
+  test "a module page lists its own sections" do
+    get doc_path("sprites")
+
+    assert_select "nav.doc-nav a[href=?]", "#indexing"
+    assert_select "section#indexing h2", text: "indexing"
+  end
+
+  # Two methods with the same name in one module would be two elements with the
+  # same id: invalid HTML, and a link to it would jump to the first and stop
+  # there. The library defines `update` twice in animation.rb and tween.rb.
+  test "every method on a page has an id of its own" do
+    %w[animation tween scene].each do |slug|
+      get doc_path(slug)
+
+      ids = css_select(".doc-method").map { |element| element["id"] }
+      assert_equal ids.uniq, ids, "#{slug} has two methods with the same id"
+    end
+  end
+
+  # An identifier in the guide's prose is written in backticks, the way the
+  # library's own comments are. Rendered as plain text it puts a literal
+  # backtick on the page, and the reader is left guessing whether the marks
+  # are part of the name.
+  test "no backtick reaches the page as text" do
+    get docs_path
+
+    assert_no_match(/`[^`<]{1,60}`/, response.body)
+  end
+
+  test "the source page offers a way back to the API index too" do
+    get doc_source_path("draw")
+
+    assert_select "a[href=?]", docs_path, text: /the API index/
   end
 
   test "a module that does not exist is a 404, not an empty page" do

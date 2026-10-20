@@ -3,26 +3,36 @@
 <div class="page-head">
   <h1>The console library</h1>
   <p class="lede">
-    Every cart on this site runs against the same library, and it travels with
-    your upload &mdash; there is nothing to install and nothing to require.
+    Everything you need to write a cart for this site. The console runs 60
+    times a second and the library travels with your upload, so nothing here
+    needs installing and nothing needs requiring.
     This is console <%= @console_version.version %><%= ", the version a new upload is pinned to" if @console_version.default? %>.
   </p>
 </div>
 
-<div class="doc-note">
-  <p>
-    A cart is a directory with a contract: an entry file naming a class after
-    the directory, and whatever art and data it needs beside it. Zip that
-    directory, upload it, publish it. Everything below is what goes in the file.
-  </p>
-</div>
+<%# The contents, because a manual that is six sections long needs a way in
+    that is not scrolling. %>
+<nav class="doc-toc" aria-label="Contents">
+  <ul>
+    <% @guide.sections.each_with_index do |section, i| %>
+      <li><%= link_to "#{i + 1}. #{section[:title]}", "##{section[:id]}" %></li>
+    <% end %>
+  </ul>
+</nav>
 
-<section class="doc-section" id="get-it">
-  <h2>Get the console</h2>
+<section class="doc-section" id="start">
+  <h2><span class="doc-num">1.</span> Getting started</h2>
   <p>
-    A cart runs on the console: a directory of Ruby, this library, and a small
-    tool that boots it. Unpack the download into a checkout and the library is
-    in place.
+    Your cart is a folder. One Ruby file inside it defines a class, and that class
+    is the cart. Art and data go in folders of their own. Zip the cart folder and
+    upload it.
+  </p>
+  <pre class="source layout"><%= raw FileHighlighter.new("layout.txt", @guide.layout[:tree]).call %></pre>
+  <%= doc_prose(@guide.layout[:rule], class_name: "doc-rule") %>
+
+  <p>
+    You need the console to boot a cart. The download holds the library and the
+    tool that boots it, so unpack the download over a checkout and you can run one.
   </p>
   <p>
     <% if authenticated? %>
@@ -38,54 +48,40 @@
   </p>
 </section>
 
-<section class="doc-section" id="your-first-cart">
-  <h2>Your first cart</h2>
-  <% @guide.samples.each_with_index do |sample, index| %>
+<section class="doc-section" id="first-cart">
+  <h2><span class="doc-num">2.</span> Your first cart</h2>
+  <p class="muted">
+    Five examples, each one building on the last. They all go in the same file.
+  </p>
+  <% @guide.samples.each do |sample| %>
     <div class="doc-sample" id="<%= sample.id %>">
       <h3><%= sample.title %></h3>
-      <p><%= sample.note %></p>
+      <p class="doc-path">
+        <%= sample.verb %> <code><%= sample.file %></code>
+      </p>
+      <%= doc_prose(sample.note) %>
       <pre class="source"><%= raw FileHighlighter.new("sample.rb", sample.code).call %></pre>
     </div>
   <% end %>
 </section>
 
-<section class="doc-section" id="hooks">
-  <h2>The hooks</h2>
-  <p class="muted">
-    Every hook is optional. A cart that defines none of them still boots &mdash;
-    it just does nothing.
-  </p>
-  <table class="doc-table">
-    <tbody>
-      <% @guide.hooks.each do |hook| %>
-        <tr>
-          <td><code><%= hook[:name] %></code></td>
-          <td class="doc-when"><%= hook[:when] %></td>
-          <td><%= hook[:note] %></td>
-        </tr>
-      <% end %>
-    </tbody>
-  </table>
-</section>
-
 <section class="doc-section" id="publishing">
-  <h2>Sending a cart here</h2>
+  <h2><span class="doc-num">3.</span> Sending a cart here</h2>
   <p>
     No archive to build and no upload form. With the bundle unpacked and your key
     in it:
   </p>
-  <pre class="source">./publish-site arcade</pre>
+  <pre class="source">./bin/publish-site arcade</pre>
 
   <ol class="doc-steps">
     <% @guide.publishing[:steps].each do |step| %>
-      <li><%= step %></li>
+      <li><%= doc_inline(step) %></li>
     <% end %>
   </ol>
 
   <p class="muted">
-    The same upload, without the browser. Everything the form refuses it refuses
-    &mdash; traversal, symlinks, expansion bombs, art a cart names but does not own
-    &mdash; and it says so in the message.
+    The same upload, without the browser. Traversal, symlinks and expansion bombs
+    are refused, as is art a cart names but does not own. The message says which one.
   </p>
 
   <details class="doc-endpoint">
@@ -94,21 +90,96 @@
   </details>
 </section>
 
-<section class="doc-section" id="reference">
-  <h2>The API</h2>
-  <p>
-    <%= pluralize(@modules.size, "module") %>, described by the library's own
-    comments. Nothing here is written by hand, so it cannot drift from the code
-    it describes.
+<section class="doc-section" id="primer">
+  <h2><span class="doc-num">4.</span> Ruby primer</h2>
+  <p class="muted">
+    A cart is written in Ruby. This is the part of the language a cart needs,
+    and nothing more.
+  </p>
+  <% @guide.primer.each do |topic| %>
+    <div class="doc-topic">
+      <h3><%= topic.title %></h3>
+      <%= doc_prose(topic.prose) %>
+      <% if topic.list.present? %>
+        <ul class="doc-list">
+          <% topic.list.each do |item| %><li><%= doc_inline(item) %></li><% end %>
+        </ul>
+      <% end %>
+      <% if topic.code.present? %>
+        <pre class="source"><%= raw FileHighlighter.new("primer.rb", topic.code).call %></pre>
+      <% end %>
+    </div>
+  <% end %>
+</section>
+
+<section class="doc-section" id="structure">
+  <h2><span class="doc-num">5.</span> Cart structure</h2>
+  <p class="muted">
+    What the console does with your cart, and in what order. The API reference
+    says what each method does; this says what happens around them.
   </p>
 
-  <ul class="doc-index">
-    <% @modules.each do |mod| %>
-      <li>
-        <%= link_to mod.name, doc_path(mod.slug) %>
-        <span class="doc-index-summary"><%= mod.summary %></span>
-        <span class="muted"><%= pluralize(mod.sections.sum { |s| s.methods.size }, "method") %></span>
-      </li>
-    <% end %>
-  </ul>
+  <% @guide.structure.each do |topic| %>
+    <div class="doc-topic">
+      <h3><%= topic.title %></h3>
+      <%= doc_prose(topic.prose) %>
+      <% if topic.list.present? %>
+        <ul class="doc-list">
+          <% topic.list.each do |item| %><li><%= doc_inline(item) %></li><% end %>
+        </ul>
+      <% end %>
+      <% if topic.code.present? %>
+        <pre class="source"><%= raw FileHighlighter.new("structure.rb", topic.code).call %></pre>
+      <% end %>
+    </div>
+  <% end %>
+
+  <div class="doc-topic">
+    <h3>The hooks</h3>
+    <%= doc_prose("Every hook is optional. A cart that defines none of them still boots, and does nothing.") %>
+    <table class="doc-table">
+      <tbody>
+        <% @guide.hooks.each do |hook| %>
+          <tr>
+            <td><code><%= hook[:name] %></code></td>
+            <td class="doc-when"><%= hook[:when] %></td>
+            <td><%= doc_inline(hook[:note]) %></td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="doc-section" id="reference">
+  <h2><span class="doc-num">6.</span> API reference</h2>
+  <p>
+    <%= pluralize(@modules.size, "module") %>. Every description is read out of the
+    library's own comments, so it stays true of the code. Only the grouping is
+    written by hand.
+  </p>
+  <p class="muted">
+    Each method links to where it is documented in full.
+  </p>
+
+  <% @guide.groups(@modules).each do |group| %>
+    <div class="doc-subsystem">
+      <h3><%= group[:title] %></h3>
+      <p class="muted"><%= doc_inline(group[:note]) %></p>
+
+      <% group[:modules].each do |mod| %>
+        <div class="doc-apimodule">
+          <h4><%= link_to mod.name, doc_path(mod.slug) %></h4>
+          <p class="doc-index-summary"><%= doc_summary(mod) %></p>
+          <ul class="doc-signatures">
+            <% mod.sections.flat_map(&:methods).each do |method| %>
+              <li>
+                <%= link_to method.signature, doc_path(mod.slug, anchor: mod.anchor_for(method)) %>
+              </li>
+            <% end %>
+          </ul>
+        </div>
+      <% end %>
+    </div>
+  <% end %>
 </section>

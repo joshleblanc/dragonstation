@@ -70,6 +70,22 @@ and keep each repo's own tests green on its own.
 - Dependabot manages `bundler` and `github-actions` — expect its PRs, don't hand-bump versions
 - Update `README.md` in the same change when behavior moves; it is the design document for this app
 
+## Documentation
+
+`README.md` is the whole documentation, in three layers plus a reference:
+
+- **Using Dragonstation** — what a person does. Endpoints, tasks and limits are stated as
+  they are, so a behavior change means editing this layer.
+- **Running Dragonstation** — running and operating the site.
+- **How it works** — the design rationale. This is the layer to read before changing behavior,
+  and to extend when a change has a reason worth recording.
+- **Reference** — the endpoint table, the rake-task table, troubleshooting and layout. These are
+  **generated from the code's behavior and must be updated in the same commit** as any change to
+  a route, a task, an upload limit or a failure mode.
+
+The README carries a linked table of contents near the top. When you add or rename a heading,
+add or rename its entry there too, and keep the anchors in sync — a broken link is a doc bug.
+
 ## Security
 
 - Never commit secrets: `.env*` and `/config/*.key` are gitignored; `config/master.key` stays untracked

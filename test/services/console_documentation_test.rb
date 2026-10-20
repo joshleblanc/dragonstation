@@ -44,6 +44,18 @@ class ConsoleDocumentationTest < ActiveSupport::TestCase
     assert_operator sprites.line_count, :>, 100
   end
 
+  # The summary is the one line the index shows, and it is what a reader decides
+  # to open the page on. A header that wraps is reflowed and cut at the end of
+  # its first sentence, not read as a source line -- which would leave half a
+  # sentence in the list.
+  test "a summary is a whole sentence, even when the header wraps" do
+    @docs.modules.each do |mod|
+      next if mod.summary.blank?
+
+      assert mod.summary.end_with?("."), "#{mod.slug}'s summary is cut short: #{mod.summary}"
+    end
+  end
+
   test "a method carries the comment written above it" do
     path = @docs.find("sprites").sections.flat_map(&:methods).find { |m| m.name == "frames" }
 
@@ -131,6 +143,48 @@ class ConsoleDocumentationTest < ActiveSupport::TestCase
 
   test "an unknown slug is nil rather than an exception" do
     assert_nil @docs.find("no-such-module")
+  end
+
+  # A section is linked by its title, so a reader can jump to the half of a
+  # module they want. Two sections with the same title would share an id, and
+  # the second link would jump to the first.
+  test "every section has an anchor of its own, taken from its title" do
+    sections = @docs.find("sprites").sections
+    anchors = sections.map(&:anchor)
+
+    assert_equal anchors.uniq, anchors
+    assert_includes anchors, "indexing"
+    assert_includes anchors, "procedural-generation"
+  end
+
+  # Two methods with the same name in one module are two elements with the same
+  # id: invalid HTML, and a link to it jumps to the first and stops there. The
+  # library does this -- `update` is defined in both Console::Anim and its
+  # sprite class -- so the anchor has to be made unique rather than the
+  # library rewritten.
+  test "a method defined twice gets a second anchor rather than a duplicate id" do
+    docs = ConsoleDocumentation.new(
+      candidate_library("dupes",
+        "app/main.rb" => "require 'app/console/dupes.rb'\n",
+        "app/console/dupes.rb" => <<~RUBY)
+          module Console
+            module Dupes
+              def update; end
+            end
+
+            class Thing
+              def update; end
+            end
+          end
+        RUBY
+    )
+
+    mod = docs.find("dupes")
+    updates = mod.sections.flat_map(&:methods).select { |m| m.name == "update" }
+    anchors = updates.map { |m| mod.anchor_for(m) }
+
+    assert_equal 2, updates.size
+    assert_equal anchors.uniq, anchors, "two methods share one anchor"
   end
 
   test "a module that will not parse yields a page that explains itself" do

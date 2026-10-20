@@ -371,7 +371,94 @@ input[type="submit"]:hover, .link-button:hover { filter: brightness(1.08); }
   padding: 0;
 }
 .doc-method dd p { margin: 0 0 0.4rem; }
-.doc .doc code { background: var(--panel-2); }
+.doc code { background: var(--panel-2); }
+
+/* The contents, at the top of a page that is a manual. */
+.doc-toc {
+  margin: 1.5rem 0 0.5rem;
+  padding: 0.9rem 1.2rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.doc-toc ul { margin: 0; padding: 0; list-style: none; }
+.doc-toc li { margin: 0.15rem 0; font-size: 0.9rem; }
+.doc-toc a { color: var(--muted); }
+.doc-toc a:hover { color: var(--accent); }
+
+/* A section number, so the headings read as a manual rather than a page. */
+.doc-num { color: var(--line); margin-right: 0.35rem; }
+
+/* A topic in the primer or the cart structure section. */
+.doc-topic { margin: 0 0 1.75rem; }
+.doc-topic p { margin: 0 0 0.6rem; }
+.doc-list { margin: 0 0 0.7rem; padding-left: 1.2rem; }
+.doc-list li { margin: 0.25rem 0; }
+
+/* A subsystem of the API reference, and the modules inside it. */
+.doc-subsystem { margin: 1.75rem 0; }
+.doc-subsystem > h3 { font-size: 1.05rem; margin: 0 0 0.2rem; }
+.doc-subsystem > p { margin: 0 0 0.9rem; }
+
+.doc-apimodule { margin: 0 0 1.1rem; }
+.doc-apimodule h4 {
+  font-size: 0.92rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  margin: 0 0 0.15rem;
+}
+.doc-apimodule .doc-index-summary { margin: 0 0 0.35rem; font-size: 0.86rem; }
+
+/* Every method of a module, by signature, each one linking to where it is
+   documented in full. The reference is long, but it is one page and it can be
+   searched in the browser. */
+.doc-signatures {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  columns: 2;
+  column-gap: 2rem;
+}
+.doc-signatures li { margin: 0 0 0.15rem; break-inside: avoid; }
+.doc-signatures a {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.doc-signatures a:hover { color: var(--accent); }
+
+
+/* A jump nav. The documentation page is long and its parts are not in the
+   order a reader meets them in, so the way in is stated rather than left to
+   be scrolled for. */
+.doc-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 1.25rem 0 0.5rem;
+  padding: 0.7rem 0.85rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.doc-nav a {
+  font-size: 0.82rem;
+  padding: 0.18rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+}
+.doc-nav a:hover { color: var(--accent); border-color: var(--accent); text-decoration: none; }
+
+/* The cart's shape, and the one rule about it. */
+.source.layout { margin: 0.9rem 0; }
+.doc-rule {
+  border-left: 3px solid var(--accent);
+  padding-left: 0.9rem;
+  margin: 0.9rem 0;
+}
+
+/* Where a sample goes. */
+.doc-path { color: var(--muted); font-size: 0.85rem; margin: 0 0 0.6rem; }
 
 .doc-index { list-style: none; margin: 0; padding: 0; }
 .doc-index li {
@@ -383,6 +470,23 @@ input[type="submit"]:hover, .link-button:hover { filter: brightness(1.08); }
   border-bottom: 1px solid var(--line);
 }
 .doc-index-summary { color: var(--muted); font-size: 0.86rem; }
+
+/* The API index, grouped by what a reader is looking for. */
+.doc-group { margin: 1.5rem 0; }
+.doc-group h3 { font-size: 0.95rem; margin: 0 0 0.15rem; }
+.doc-group > p { margin: 0 0 0.4rem; }
+
+/* The modules either side of this one. */
+.doc-pager {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin: 2.5rem 0 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+  font-size: 0.9rem;
+}
+.doc-pager a:only-child { margin-left: auto; }
 
 /* --- downloads and keys ------------------------------------------------ */
 
